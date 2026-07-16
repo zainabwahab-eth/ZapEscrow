@@ -1,0 +1,376 @@
+import {
+  BadRequestException,
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { MonnifyService } from "../monnify/monnify.service";
+import { TelegramService } from "../telegram/telegram.service";
+import { CreateDealDto } from "./dto/create-deal.dto";
+import { DealEventActor, DealStatus } from "@prisma/client";
+
+// Days a buyer has to respond after a deal is marked SHIPPED before
+// funds auto-release. Mirrors Alipay/Taobao's confirmation-window pattern.
+const AUTO_RELEASE_DAYS = 5;
+
+@Injectable()
+export class DealsService {
+  private readonly logger = new Logger(DealsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly monnify: MonnifyService,
+    @Inject(forwardRef(() => TelegramService))
+    private readonly telegramService: TelegramService,
+  ) {}
+
+  /** Step after the seller confirms the review screen — creates the deal + Monnify checkout. */
+  async create(dto: CreateDealDto) {
+    const seller = await this.prisma.seller.findUnique({
+      where: { id: dto.sellerId },
+    });
+    if (!seller) throw new NotFoundException("Seller not found");
+
+    const amount = dto.items.reduce(
+      (sum, item) => sum + item.unitPrice * item.quantity,
+      0,
+    );
+
+    // Create the deal first (without Monnify refs) so we always have a
+    // paymentReference to hand Monnify — deal id doubles as part of it.
+    const deal = await this.prisma.deal.create({
+      data: {
+        sellerId: dto.sellerId,
+        buyerName: dto.buyerName,
+        buyerPhone: dto.buyerPhone,
+        buyerEmail: dto.buyerEmail,
+        buyerTelegramId: dto.buyerTelegramId,
+        amount,
+        paymentReference: `pending-${Date.now()}`, // placeholder, replaced below
+        items: {
+          create: dto.items.map((item) => ({
+            name: item.name,
+            imageUrl: item.imageUrl,
+            unitPrice: item.unitPrice,
+            quantity: item.quantity,
+          })),
+        },
+        events: {
+          create: {
+            toStatus: DealStatus.CREATED,
+            actor: DealEventActor.SELLER,
+            note: "Deal created, awaiting buyer payment",
+          },
+        },
+      },
+    });
+    this.logger.log(
+      `Initializing Monnify transaction for deal ${deal.id}, amount ${amount}`,
+    );
+
+    const monnifyTx = await this.monnify.initializeTransaction({
+      amount,
+      buyerEmail: dto.buyerEmail ?? "",
+      buyerName: dto.buyerName ?? dto.buyerPhone,
+      dealId: deal.id,
+    });
+
+    this.logger.log(
+      `Monnify transaction initialized: ${JSON.stringify(monnifyTx)}`,
+    );
+
+    return this.prisma.deal.update({
+      where: { id: deal.id },
+      data: {
+        paymentReference: monnifyTx.paymentReference,
+        transactionReference: monnifyTx.transactionReference,
+        checkoutUrl: monnifyTx.checkoutUrl,
+      },
+      include: { items: true },
+    });
+  }
+
+  /** Called by the webhook handler once Monnify confirms payment. */
+  async markPaid(dealId: string) {
+    const deal = await this.getOrThrow(dealId);
+    if (deal.status !== DealStatus.CREATED) return deal; // idempotency guard
+
+    const updated = await this.transition(
+      dealId,
+      DealStatus.PAID,
+      DealEventActor.SYSTEM,
+      "Monnify confirmed payment",
+    );
+
+    const seller = await this.prisma.seller.findUnique({
+      where: { id: deal.sellerId },
+    });
+    if (seller?.telegramId) {
+      const buyerLabel = deal.buyerName || deal.buyerPhone;
+      await this.telegramService.sendMessage(
+        seller.telegramId,
+        `💰 ${buyerLabel} just paid ₦${Number(deal.amount).toLocaleString()} — funds are now held in escrow. Once you've shipped the order, reply /ship ${dealId} with an estimated delivery date (e.g. '/ship ${dealId} 2026-07-20') so we can let the buyer know when to expect it.`,
+      );
+    }
+
+    return updated;
+  }
+
+  /** Seller marks the item shipped — starts the auto-release clock. */
+  async markShipped(dealId: string, estimatedDeliveryDate?: Date) {
+    const deal = await this.getOrThrow(dealId);
+    if (deal.status !== DealStatus.PAID) {
+      throw new BadRequestException(
+        "Deal must be PAID before it can be marked shipped",
+      );
+    }
+
+    const deadline = new Date();
+    deadline.setDate(deadline.getDate() + AUTO_RELEASE_DAYS);
+
+    await this.prisma.deal.update({
+      where: { id: dealId },
+      data: {
+        shippedAt: new Date(),
+        estimatedDeliveryDate,
+        autoReleaseDeadline: deadline,
+      },
+    });
+
+    return this.transition(
+      dealId,
+      DealStatus.SHIPPED,
+      DealEventActor.SELLER,
+      "Marked shipped",
+    );
+  }
+
+  /** Buyer confirms receipt — triggers fund release. */
+  async confirmDelivery(dealId: string) {
+    const deal = await this.getOrThrow(dealId);
+    if (deal.status !== DealStatus.SHIPPED) {
+      throw new BadRequestException(
+        "Deal must be SHIPPED before delivery can be confirmed",
+      );
+    }
+
+    await this.prisma.deal.update({
+      where: { id: dealId },
+      data: { deliveredConfirmedAt: new Date() },
+    });
+    await this.transition(
+      dealId,
+      DealStatus.DELIVERED,
+      DealEventActor.BUYER,
+      "Buyer confirmed receipt",
+    );
+
+    return this.releaseFunds(dealId);
+  }
+
+  /** Buyer raises a dispute — freezes funds, creates the dispute record. */
+  async raiseDispute(dealId: string, reason: string, evidenceUrl?: string) {
+    const deal = await this.getOrThrow(dealId);
+    if (deal.status !== DealStatus.SHIPPED) {
+      throw new BadRequestException(
+        "Disputes can only be raised on shipped deals",
+      );
+    }
+
+    await this.prisma.dispute.create({
+      data: { dealId, raisedBy: DealEventActor.BUYER, reason, evidenceUrl },
+    });
+    await this.prisma.deal.update({
+      where: { id: dealId },
+      data: { disputedAt: new Date() },
+    });
+
+    return this.transition(
+      dealId,
+      DealStatus.DISPUTED,
+      DealEventActor.BUYER,
+      `Dispute: ${reason}`,
+    );
+  }
+
+  /** Admin resolves a dispute — either releases to seller or refunds buyer. */
+  async resolveDispute(dealId: string, resolution: "RELEASED" | "REFUNDED") {
+    const deal = await this.getOrThrow(dealId);
+    if (deal.status !== DealStatus.DISPUTED) {
+      throw new BadRequestException("Deal is not currently disputed");
+    }
+
+    await this.prisma.dispute.update({
+      where: { dealId },
+      data: { resolution, resolvedAt: new Date() },
+    });
+
+    if (resolution === "RELEASED") {
+      await this.transition(
+        dealId,
+        DealStatus.DELIVERED,
+        DealEventActor.ADMIN,
+        "Dispute resolved — releasing to seller",
+      );
+      return this.releaseFunds(dealId);
+    }
+
+    await this.transition(
+      dealId,
+      DealStatus.REFUNDED,
+      DealEventActor.ADMIN,
+      "Dispute resolved — refunding buyer",
+    );
+    // TODO: wire actual Monnify refund call here once refund flow is scoped
+    return this.getOrThrow(dealId);
+  }
+
+  /** Called by the scheduler for deals past their auto-release deadline with no buyer response. */
+  async autoRelease(dealId: string) {
+    const deal = await this.getOrThrow(dealId);
+    if (deal.status !== DealStatus.SHIPPED) return deal; // already resolved
+
+    await this.transition(
+      dealId,
+      DealStatus.AUTO_RELEASED,
+      DealEventActor.SYSTEM,
+      `No buyer response after ${AUTO_RELEASE_DAYS}-day window — auto-released`,
+    );
+    return this.releaseFunds(dealId);
+  }
+
+  /** Fires the actual Monnify disbursement and records it. */
+  private async releaseFunds(dealId: string) {
+    const deal = await this.prisma.deal.findUnique({
+      where: { id: dealId },
+      include: { seller: true },
+    });
+    if (!deal) throw new NotFoundException("Deal not found");
+
+    const transfer = await this.monnify.releaseSingleTransfer({
+      amount: Number(deal.amount),
+      destinationAccountNumber: deal.seller.monnifySettlementAccount ?? "",
+      destinationBankCode: deal.seller.monnifySettlementBankCode ?? "",
+      destinationAccountName: deal.seller.businessName,
+      dealId: deal.id,
+    });
+
+    await this.prisma.disbursement.create({
+      data: {
+        dealId,
+        monnifyReference: transfer.reference,
+        amount: deal.amount,
+        status: transfer.status === "SUCCESS" ? "COMPLETED" : "PENDING",
+        completedAt: transfer.status === "SUCCESS" ? new Date() : null,
+      },
+    });
+
+    return this.transition(
+      dealId,
+      DealStatus.RELEASED,
+      DealEventActor.SYSTEM,
+      "Funds disbursed to seller",
+    );
+  }
+
+  private async transition(
+    dealId: string,
+    toStatus: DealStatus,
+    actor: DealEventActor,
+    note: string,
+  ) {
+    const current = await this.getOrThrow(dealId);
+    await this.prisma.dealEvent.create({
+      data: { dealId, fromStatus: current.status, toStatus, actor, note },
+    });
+    return this.prisma.deal.update({
+      where: { id: dealId },
+      data: { status: toStatus },
+    });
+  }
+
+  private async getOrThrow(dealId: string) {
+    const deal = await this.prisma.deal.findUnique({ where: { id: dealId } });
+    if (!deal) throw new NotFoundException("Deal not found");
+    return deal;
+  }
+
+  /** Dashboard: filterable deal list for a seller. */
+  async listForSeller(sellerId: string, status?: DealStatus) {
+    return this.prisma.deal.findMany({
+      where: { sellerId, ...(status ? { status } : {}) },
+      include: { items: true },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  /** Dashboard: escrow totals. */
+  async getSellerTotals(sellerId: string) {
+    const [inEscrow, released, refunded] = await Promise.all([
+      this.prisma.deal.aggregate({
+        where: {
+          sellerId,
+          status: {
+            in: [DealStatus.PAID, DealStatus.SHIPPED, DealStatus.DISPUTED],
+          },
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.disbursement.aggregate({
+        where: { deal: { sellerId }, status: "COMPLETED" },
+        _sum: { amount: true },
+      }),
+      this.prisma.deal.aggregate({
+        where: { sellerId, status: DealStatus.REFUNDED },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    return {
+      totalInEscrow: inEscrow._sum.amount ?? 0,
+      totalReleased: released._sum.amount ?? 0,
+      totalRefunded: refunded._sum.amount ?? 0,
+    };
+  }
+
+  /** Used by the scheduler to find deals to nudge or auto-release. */
+  async findPastDeadline() {
+    return this.prisma.deal.findMany({
+      where: {
+        status: DealStatus.SHIPPED,
+        autoReleaseDeadline: { lte: new Date() },
+      },
+    });
+  }
+
+  /** Public buyer-facing checkout page — no seller-sensitive data included. */
+  async getPublicDealView(dealId: string) {
+    const deal = await this.prisma.deal.findUnique({
+      where: { id: dealId },
+      include: {
+        items: true,
+        seller: { select: { businessName: true, verifiedBadge: true } },
+      },
+    });
+    if (!deal) throw new NotFoundException("Deal not found");
+
+    return {
+      id: deal.id,
+      sellerName: deal.seller.businessName,
+      sellerVerified: deal.seller.verifiedBadge,
+      buyerName: deal.buyerName,
+      amount: deal.amount,
+      status: deal.status,
+      checkoutUrl: deal.checkoutUrl,
+      items: deal.items.map((i) => ({
+        name: i.name,
+        imageUrl: i.imageUrl,
+        unitPrice: i.unitPrice,
+        quantity: i.quantity,
+      })),
+    };
+  }
+}
