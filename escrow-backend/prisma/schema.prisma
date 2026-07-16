@@ -1,0 +1,192 @@
+// Escrow platform — Prisma schema
+// Postgres (Supabase) via DATABASE_URL in .env
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+enum DealStatus {
+  CREATED
+  PAID
+  SHIPPED
+  DELIVERED
+  DISPUTED
+  AUTO_RELEASED
+  RELEASED
+  REFUNDED
+  EXPIRED
+}
+
+enum DealEventActor {
+  SELLER
+  BUYER
+  SYSTEM
+  ADMIN
+}
+
+enum DisbursementStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum DisputeResolution {
+  RELEASED
+  REFUNDED
+}
+
+enum NotificationChannel {
+  TELEGRAM
+  EMAIL
+}
+
+enum NotificationType {
+  DAILY_DIGEST
+  DISPUTE_ALERT
+  DEADLINE_REMINDER
+  PAYMENT_CONFIRMED
+  SHIPPED_REMINDER
+}
+
+model Seller {
+  id                        String   @id @default(uuid())
+  email                     String   @unique
+  phone                     String?
+  businessName              String
+  telegramId                String?  @unique
+  passwordHash              String?
+  monnifySettlementAccount  String?
+  monnifySettlementBankCode String?
+  verifiedBadge             Boolean  @default(false)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  deals         Deal[]
+  notifications NotificationLog[]
+
+  @@map("sellers")
+}
+
+model Deal {
+  id          String @id @default(uuid())
+  sellerId    String
+  seller      Seller @relation(fields: [sellerId], references: [id])
+
+  // Buyer info — buyer is always accountless, these are just contact details
+  buyerName    String?
+  buyerPhone   String
+  buyerEmail   String?
+  buyerTelegramId String?
+
+  // Money / Monnify
+  amount               Decimal  @db.Decimal(12, 2) // sum of deal_items, kept in sync at write time
+  paymentReference     String   @unique // ours — must be unique per attempt
+  transactionReference String?  @unique // Monnify's reference, set once payment initiates
+  checkoutUrl          String?
+
+  status DealStatus @default(CREATED)
+
+  estimatedDeliveryDate DateTime?
+  shippedAt             DateTime?
+  autoReleaseDeadline   DateTime? // computed when marked SHIPPED — scheduler checks this
+  deliveredConfirmedAt  DateTime?
+  disputedAt             DateTime?
+  releasedAt             DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items         DealItem[]
+  events        DealEvent[]
+  dispute       Dispute?
+  disbursement  Disbursement?
+
+  @@index([sellerId, status])
+  @@map("deals")
+}
+
+model DealItem {
+  id        String  @id @default(uuid())
+  dealId    String
+  deal      Deal    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  name      String
+  imageUrl  String?
+  unitPrice Decimal @db.Decimal(12, 2)
+  quantity  Int     @default(1)
+
+  @@map("deal_items")
+}
+
+model DealEvent {
+  id         String          @id @default(uuid())
+  dealId     String
+  deal       Deal            @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  fromStatus DealStatus?
+  toStatus   DealStatus
+  actor      DealEventActor
+  note       String?
+  createdAt  DateTime        @default(now())
+
+  @@index([dealId])
+  @@map("deal_events")
+}
+
+// Idempotency guard for Monnify webhook callbacks — webhooks can arrive
+// more than once, so we check transactionReference hasn't been processed
+// before acting on it.
+model WebhookEvent {
+  id                    String   @id @default(uuid())
+  eventType             String
+  transactionReference  String
+  payload               Json
+  processed             Boolean  @default(false)
+  receivedAt            DateTime @default(now())
+
+  @@unique([transactionReference, eventType])
+  @@map("webhook_events")
+}
+
+model Dispute {
+  id          String             @id @default(uuid())
+  dealId      String             @unique
+  deal        Deal               @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  raisedBy    DealEventActor
+  reason      String
+  evidenceUrl String?
+  sellerResponse String?
+  resolution  DisputeResolution?
+  resolvedAt  DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@map("disputes")
+}
+
+model Disbursement {
+  id                String              @id @default(uuid())
+  dealId            String              @unique
+  deal              Deal                @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  monnifyReference  String              @unique
+  amount            Decimal             @db.Decimal(12, 2)
+  status            DisbursementStatus  @default(PENDING)
+  initiatedAt       DateTime            @default(now())
+  completedAt       DateTime?
+
+  @@map("disbursements")
+}
+
+model NotificationLog {
+  id        String               @id @default(uuid())
+  sellerId  String
+  seller    Seller               @relation(fields: [sellerId], references: [id])
+  type      NotificationType
+  channel   NotificationChannel
+  payload   Json?
+  sentAt    DateTime             @default(now())
+
+  @@map("notification_log")
+}
