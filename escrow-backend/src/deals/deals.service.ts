@@ -10,7 +10,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { MonnifyService } from "../monnify/monnify.service";
 import { TelegramService } from "../telegram/telegram.service";
 import { CreateDealDto } from "./dto/create-deal.dto";
-import { DealEventActor, DealStatus } from "@prisma/client";
+import { DealEventActor, DealStatus, Prisma } from "@prisma/client";
 
 // Days a buyer has to respond after a deal is marked SHIPPED before
 // funds auto-release. Mirrors Alipay/Taobao's confirmation-window pattern.
@@ -41,29 +41,27 @@ export class DealsService {
 
     // Create the deal first (without Monnify refs) so we always have a
     // paymentReference to hand Monnify — deal id doubles as part of it.
-    const deal = await this.prisma.deal.create({
-      data: {
-        sellerId: dto.sellerId,
-        buyerName: dto.buyerName,
-        buyerPhone: dto.buyerPhone,
-        buyerEmail: dto.buyerEmail,
-        buyerTelegramId: dto.buyerTelegramId,
-        amount,
-        paymentReference: `pending-${Date.now()}`, // placeholder, replaced below
-        items: {
-          create: dto.items.map((item) => ({
-            name: item.name,
-            imageUrl: item.imageUrl,
-            unitPrice: item.unitPrice,
-            quantity: item.quantity,
-          })),
-        },
-        events: {
-          create: {
-            toStatus: DealStatus.CREATED,
-            actor: DealEventActor.SELLER,
-            note: "Deal created, awaiting buyer payment",
-          },
+    const deal = await this.createDealWithShortCode({
+      sellerId: dto.sellerId,
+      buyerName: dto.buyerName,
+      buyerPhone: dto.buyerPhone,
+      buyerEmail: dto.buyerEmail,
+      buyerTelegramId: dto.buyerTelegramId,
+      amount,
+      paymentReference: `pending-${Date.now()}`, // placeholder, replaced below
+      items: {
+        create: dto.items.map((item) => ({
+          name: item.name,
+          imageUrl: item.imageUrl,
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+        })),
+      },
+      events: {
+        create: {
+          toStatus: DealStatus.CREATED,
+          actor: DealEventActor.SELLER,
+          note: "Deal created, awaiting buyer payment",
         },
       },
     });
@@ -112,7 +110,7 @@ export class DealsService {
       const buyerLabel = deal.buyerName || deal.buyerPhone;
       await this.telegramService.sendMessage(
         seller.telegramId,
-        `💰 ${buyerLabel} just paid ₦${Number(deal.amount).toLocaleString()} — funds are now held in escrow. Once you've shipped the order, reply /ship ${dealId} with an estimated delivery date (e.g. '/ship ${dealId} 2026-07-20') so we can let the buyer know when to expect it.`,
+        `💰 ${buyerLabel} just paid ₦${Number(deal.amount).toLocaleString()} — funds are now held in escrow. Once you've shipped the order, reply /ship ${deal.shortCode} with an estimated delivery date (e.g. '/ship ${deal.shortCode} 2026-07-20') so we can let the buyer know when to expect it.`,
       );
     }
 
@@ -296,6 +294,42 @@ export class DealsService {
     const deal = await this.prisma.deal.findUnique({ where: { id: dealId } });
     if (!deal) throw new NotFoundException("Deal not found");
     return deal;
+  }
+
+  /** Looks up a deal by its human-friendly code (e.g. from a /ship command). */
+  async findByShortCode(shortCode: string) {
+    const deal = await this.prisma.deal.findUnique({
+      where: { shortCode: shortCode.toUpperCase() },
+    });
+    if (!deal) throw new NotFoundException(`No deal found with code ${shortCode}`);
+    return deal;
+  }
+
+  /** Creates a deal record with a unique shortCode, retrying on the rare collision. */
+  private async createDealWithShortCode(
+    data: Omit<Prisma.DealUncheckedCreateInput, "shortCode">,
+  ) {
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        return await this.prisma.deal.create({
+          data: { ...data, shortCode: this.generateShortCode() },
+        });
+      } catch (err) {
+        const isShortCodeCollision =
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === "P2002" &&
+          (err.meta?.target as string[] | undefined)?.includes("shortCode");
+        if (!isShortCodeCollision || attempt === MAX_ATTEMPTS) throw err;
+      }
+    }
+    throw new Error("Failed to generate a unique short code");
+  }
+
+  /** 6-char uppercase code, ambiguous characters excluded, for buyer/seller-facing references. */
+  private generateShortCode(): string {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
   }
 
   /** Dashboard: filterable deal list for a seller. */

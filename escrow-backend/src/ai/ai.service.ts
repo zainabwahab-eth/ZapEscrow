@@ -39,6 +39,8 @@ export class AiService {
    */
   async extractDealFromText(text: string): Promise<{
     buyerName?: string;
+    buyerPhone?: string;
+    buyerEmail?: string;
     items: { name: string; unitPrice: number; quantity: number }[];
   }> {
     try {
@@ -50,8 +52,10 @@ export class AiService {
             content:
               'Extract structured deal info from Nigerian seller messages. ' +
               'Respond ONLY with JSON, no preamble, no markdown fences. ' +
-              'Shape: {"buyerName": string|null, "items": [{"name": string, "unitPrice": number, "quantity": number}]}. ' +
-              'Prices are in Naira. If quantity is not stated, default to 1.',
+              'Shape: {"buyerName": string|null, "buyerPhone": string|null, "buyerEmail": string|null, "items": [{"name": string, "unitPrice": number, "quantity": number}]}. ' +
+              'Phone numbers are Nigerian format (e.g. 080..., 070..., 090..., 081...). ' +
+              'Prices are in Naira. If quantity is not stated, default to 1. ' +
+              'If buyer phone or email are not mentioned, use null.',
           },
           { role: 'user', content: text },
         ],

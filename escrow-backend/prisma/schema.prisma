@@ -8,6 +8,7 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum DealStatus {
@@ -74,6 +75,7 @@ model Seller {
 
 model Deal {
   id          String @id @default(uuid())
+  shortCode   String @unique // human-friendly code shown in Telegram, e.g. "A3F9K2"
   sellerId    String
   seller      Seller @relation(fields: [sellerId], references: [id])
 
