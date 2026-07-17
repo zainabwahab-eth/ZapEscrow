@@ -64,6 +64,7 @@ model Seller {
   monnifySettlementAccount  String?
   monnifySettlementBankCode String?
   verifiedBadge             Boolean  @default(false)
+  emailVerifiedAt           DateTime?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 

@@ -65,4 +65,11 @@ export class SellersService {
       data: { monnifySettlementAccount: accountNumber, monnifySettlementBankCode: bankCode },
     });
   }
+
+  async updateEmailVerified(id: string) {
+    return this.prisma.seller.update({
+      where: { id },
+      data: { emailVerifiedAt: new Date() },
+    });
+  }
 }

@@ -9,6 +9,8 @@ import { TelegramModule } from './telegram/telegram.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { AiModule } from './ai/ai.module';
+import { EmailModule } from './email/email.module';
+import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
@@ -22,6 +24,8 @@ import { AiModule } from './ai/ai.module';
     WebhooksModule,
     SchedulerModule,
     AiModule,
+    EmailModule,
+    StorageModule,
   ],
 })
 export class AppModule {}
