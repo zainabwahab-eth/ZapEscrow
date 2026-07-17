@@ -212,7 +212,23 @@ export class TelegramService implements OnModuleInit {
     await this.redis.del(this.stateKey(telegramId));
 
     const publicUrl = `${this.config.get<string>('PUBLIC_FRONTEND_URL', '')}/pay/${deal.id}`;
-    await ctx.reply(`Link created! Deal code: ${deal.shortCode}\nSend this to your buyer:\n${publicUrl}`);
+
+    await ctx.reply(
+      `Link created! Code: ${deal.shortCode}\n\nSend this to your buyer:\n${publicUrl}`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📋 Copy link', copy_text: { text: publicUrl } }],
+            [
+              {
+                text: '↗️ Share via Telegram',
+                url: `https://t.me/share/url?url=${encodeURIComponent(publicUrl)}&text=${encodeURIComponent("Here's your secure payment link — your money stays protected in escrow until you confirm you received your order.")}`,
+              },
+            ],
+          ],
+        } as any,
+      },
+    );
   }
 
   /** Runs a free-text deal description through AI extraction and shows the review card. Shared by natural-language messages and /add. */
@@ -349,7 +365,8 @@ export class TelegramService implements OnModuleInit {
 
     // Seller marks a paid deal as shipped, e.g. "/ship A3F9K2 2026-07-20"
     this.bot.command('ship', async (ctx) => {
-      const [shortCode, etaStr] = ctx.message.text.split(' ').slice(1);
+      const [shortCode, ...etaParts] = ctx.message.text.split(' ').slice(1);
+      const etaStr = etaParts.join(' ');
       if (!shortCode) {
         await ctx.reply(
           'Which deal? Reply with: /ship <code> [expected delivery date, e.g. 2026-07-20]. Use /deals to see your deal codes.',
@@ -357,9 +374,14 @@ export class TelegramService implements OnModuleInit {
         return;
       }
 
+      const eta = etaStr ? new Date(etaStr) : undefined;
+      if (eta && Number.isNaN(eta.getTime())) {
+        await ctx.reply(`I couldn't understand "${etaStr}" as a date — try YYYY-MM-DD, e.g. 2026-07-20.`);
+        return;
+      }
+
       try {
         const deal = await this.dealsService.findByShortCode(shortCode);
-        const eta = etaStr ? new Date(etaStr) : undefined;
         const updated = await this.dealsService.markShipped(deal.id, eta);
         await ctx.reply(
           `📦 Deal ${updated.shortCode} marked as shipped${etaStr ? ` — estimated delivery ${etaStr}` : ''}. We'll let the buyer know.`,
