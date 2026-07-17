@@ -1,24 +1,54 @@
 import { forwardRef, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Telegraf, Markup } from 'telegraf';
+import { message } from 'telegraf/filters';
 import Redis from 'ioredis';
 import { SellersService } from '../sellers/sellers.service';
 import { DealsService } from '../deals/deals.service';
 import { AiService } from '../ai/ai.service';
+import { EmailService } from '../email/email.service';
+import { StorageService } from '../storage/storage.service';
+import { MonnifyService } from '../monnify/monnify.service';
 import { DealStatus } from '@prisma/client';
+
+interface DraftDealItem {
+  name: string;
+  unitPrice: number;
+  quantity: number;
+  imageUrl?: string;
+}
 
 interface DraftDeal {
   buyerName?: string;
   buyerPhone?: string;
   buyerEmail?: string;
-  items: { name: string; unitPrice: number; quantity: number }[];
+  items: DraftDealItem[];
 }
 
-type DealFlowState = 'AWAITING_DEAL' | 'AWAITING_BUYER_PHONE';
+type ConversationState = 'AWAITING_DEAL' | 'AWAITING_BUYER_PHONE' | 'AWAITING_OTP';
 
 const DRAFT_TTL_SECONDS = 60 * 30; // 30 min — abandoned drafts just expire
+const OTP_TTL_SECONDS = 600; // 10 min
+const BANK_CONFIRM_TTL_SECONDS = 600; // 10 min — window to tap Confirm/Cancel after /bank
 
 const CHITCHAT_WORDS = new Set(['hi', 'hello', 'hey', 'sup', 'test', 'ok', 'okay', 'thanks', 'thank you']);
+
+// Common Nigerian banks/fintechs a seller is likely to type, mapped to their
+// NIBSS/Monnify bank codes. Keys are normalized (lowercase, no spaces).
+const BANK_NAME_TO_CODE: Record<string, string> = {
+  gtbank: '058',
+  gtb: '058',
+  access: '044',
+  accessbank: '044',
+  zenith: '057',
+  zenithbank: '057',
+  uba: '033',
+  firstbank: '011',
+  first: '011',
+  kuda: '50211',
+  opay: '999992',
+  moniepoint: '50515',
+};
 
 /**
  * In-progress deals live in Redis, keyed by telegramId, and are never
@@ -39,6 +69,9 @@ export class TelegramService implements OnModuleInit {
     '📦 <b>Manage deals</b>\n' +
     '/deals — see everything currently in escrow\n' +
     '/ship &lt;code&gt; [estimated arrival date] — mark a deal as shipped, e.g. /ship A3F9K2 2026-07-20\n\n' +
+    '👤 <b>Account</b>\n' +
+    '/verify — verify your email\n' +
+    '/bank &lt;account number&gt; &lt;bank name&gt; — set where payouts get sent\n\n' +
     '❓ /help — show this message again';
 
   constructor(
@@ -47,6 +80,9 @@ export class TelegramService implements OnModuleInit {
     @Inject(forwardRef(() => DealsService))
     private readonly dealsService: DealsService,
     private readonly aiService: AiService,
+    private readonly emailService: EmailService,
+    private readonly storageService: StorageService,
+    private readonly monnifyService: MonnifyService,
   ) {
     this.redis = new Redis(this.config.get<string>('REDIS_URL', 'redis://localhost:6379'));
   }
@@ -64,27 +100,39 @@ export class TelegramService implements OnModuleInit {
       ctx.reply('Something went wrong processing that — please try again.').catch(() => {});
     });
 
-    await this.bot.telegram.setMyCommands([
-      { command: 'start', description: 'Get started / see all commands' },
-      { command: 'add', description: 'Create a deal (guided)' },
-      { command: 'deals', description: 'See all deals in escrow' },
-      { command: 'ship', description: 'Mark a deal as shipped' },
-      { command: 'help', description: 'Show all commands' },
-    ]);
+    try {
+      await this.bot.telegram.setMyCommands([
+        { command: 'start', description: 'Get started / see all commands' },
+        { command: 'add', description: 'Create a deal (guided)' },
+        { command: 'deals', description: 'See all deals in escrow' },
+        { command: 'ship', description: 'Mark a deal as shipped' },
+        { command: 'verify', description: 'Verify your email' },
+        { command: 'bank', description: 'Set your payout account' },
+        { command: 'help', description: 'Show all commands' },
+      ]);
+    } catch (err) {
+      this.logger.error('Failed to register the bot command menu with Telegram — continuing without it:', err);
+    }
 
     this.registerHandlers();
 
-    const useWebhook = this.config.get<string>('TELEGRAM_USE_WEBHOOK') === 'true';
-    if (useWebhook) {
-      const webhookUrl = this.config.get<string>('TELEGRAM_WEBHOOK_URL');
-      if (webhookUrl) {
-        await this.bot.telegram.setWebhook(webhookUrl);
+    // Network calls to Telegram's API (launch/setWebhook) can fail transiently —
+    // don't let that take down the rest of the app (DB, HTTP API, dashboard).
+    try {
+      const useWebhook = this.config.get<string>('TELEGRAM_USE_WEBHOOK') === 'true';
+      if (useWebhook) {
+        const webhookUrl = this.config.get<string>('TELEGRAM_WEBHOOK_URL');
+        if (webhookUrl) {
+          await this.bot.telegram.setWebhook(webhookUrl);
+        } else {
+          this.logger.warn('TELEGRAM_USE_WEBHOOK is true but TELEGRAM_WEBHOOK_URL is not set — webhook not registered');
+        }
       } else {
-        this.logger.warn('TELEGRAM_USE_WEBHOOK is true but TELEGRAM_WEBHOOK_URL is not set — webhook not registered');
+        await this.bot.launch();
+        this.logger.log('Telegram bot launched in polling mode');
       }
-    } else {
-      this.bot.launch();
-      this.logger.log('Telegram bot launched in polling mode');
+    } catch (err) {
+      this.logger.error('Failed to start the Telegram bot — the rest of the app will still start:', err);
     }
   }
 
@@ -96,13 +144,26 @@ export class TelegramService implements OnModuleInit {
     return `deal-state:${telegramId}`;
   }
 
-  private async setState(telegramId: string, state: DealFlowState) {
+  private otpKey(telegramId: string) {
+    return `otp:${telegramId}`;
+  }
+
+  private pendingBankKey(telegramId: string) {
+    return `bank-pending:${telegramId}`;
+  }
+
+  private pendingPhotoKey(telegramId: string) {
+    return `photo-pending:${telegramId}`;
+  }
+
+  private async setState(telegramId: string, state: ConversationState) {
     await this.redis.set(this.stateKey(telegramId), state, 'EX', DRAFT_TTL_SECONDS);
   }
 
-  private async getState(telegramId: string): Promise<DealFlowState> {
+  private async getState(telegramId: string): Promise<ConversationState> {
     const state = await this.redis.get(this.stateKey(telegramId));
-    return state === 'AWAITING_BUYER_PHONE' ? 'AWAITING_BUYER_PHONE' : 'AWAITING_DEAL';
+    if (state === 'AWAITING_BUYER_PHONE' || state === 'AWAITING_OTP') return state;
+    return 'AWAITING_DEAL';
   }
 
   private looksLikePhoneNumber(text: string): boolean {
@@ -124,6 +185,15 @@ export class TelegramService implements OnModuleInit {
     const trimmed = text.trim().toLowerCase();
     if (trimmed.length < 12) return true;
     return CHITCHAT_WORDS.has(trimmed);
+  }
+
+  private generateOtp(): string {
+    return String(Math.floor(100000 + Math.random() * 900000));
+  }
+
+  private resolveBankCode(bankName: string): string | undefined {
+    const key = bankName.trim().toLowerCase().replace(/\s+/g, '');
+    return BANK_NAME_TO_CODE[key];
   }
 
   /** Creates the deal from a completed draft and clears its Redis state. Caller must ensure buyerPhone is set. */
@@ -194,8 +264,8 @@ export class TelegramService implements OnModuleInit {
       });
       await this.setState(String(ctx.from.id), 'AWAITING_DEAL');
       await ctx.reply(
-        `You're set up, ${seller.businessName}! Now describe a deal, e.g.\n` +
-          '"sold 2 phone cases to Musa for 3000 each and a charger for 2000"',
+        `You're set up, ${seller.businessName}! Let's verify your email next — run /verify.\n\n` +
+          'Once verified, describe a deal, e.g.\n"sold 2 phone cases to Musa for 3000 each and a charger for 2000"',
       );
     });
 
@@ -300,11 +370,131 @@ export class TelegramService implements OnModuleInit {
       }
     });
 
+    // Sends a 6-digit code to the seller's email and puts them in AWAITING_OTP state.
+    this.bot.command('verify', async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      const seller = await this.sellersService.findByTelegramId(telegramId);
+      if (!seller) {
+        await ctx.reply('Please send your email and business name first to sign up.');
+        return;
+      }
+
+      if (seller.emailVerifiedAt) {
+        await ctx.reply('Your email is already verified. ✅');
+        return;
+      }
+
+      try {
+        const code = this.generateOtp();
+        await this.redis.set(this.otpKey(telegramId), code, 'EX', OTP_TTL_SECONDS);
+        await this.setState(telegramId, 'AWAITING_OTP');
+
+        await this.emailService.sendOtp(seller.email, code);
+        await ctx.reply('Check your email for a 6-digit code, then reply with it here.');
+      } catch (err) {
+        this.logger.error(`/verify failed to send OTP for seller ${seller.id}:`, err);
+        await ctx.reply("Couldn't send the verification email — please try /verify again shortly.");
+      }
+    });
+
+    // Sets up (or updates) where escrow payouts get disbursed.
+    this.bot.command('bank', async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      const seller = await this.sellersService.findByTelegramId(telegramId);
+      if (!seller) {
+        await ctx.reply('Please send your email and business name first to sign up.');
+        return;
+      }
+
+      if (!seller.emailVerifiedAt) {
+        await ctx.reply('Please verify your email first — run /verify');
+        return;
+      }
+
+      const args = ctx.message.text.split(' ').slice(1);
+      if (args.length < 2) {
+        await ctx.reply(
+          'Send your account number and bank name together, e.g.\n/bank 0123456789 GTBank\n\n' +
+            `Supported banks: ${Array.from(new Set(Object.keys(BANK_NAME_TO_CODE))).join(', ')}`,
+        );
+        return;
+      }
+
+      const [accountNumber, ...bankNameParts] = args;
+      const bankName = bankNameParts.join(' ');
+      const bankCode = this.resolveBankCode(bankName);
+      if (!bankCode) {
+        await ctx.reply(`I don't recognize "${bankName}" as a supported bank — try GTBank, Access, Zenith, UBA, First Bank, Kuda, Opay, or Moniepoint.`);
+        return;
+      }
+
+      try {
+        const result = await this.monnifyService.nameEnquiry(accountNumber, bankCode);
+        const resolvedName = result?.responseBody?.accountName;
+        if (!resolvedName) {
+          await ctx.reply("Couldn't resolve that account — double-check the account number and bank.");
+          return;
+        }
+
+        await this.redis.set(
+          this.pendingBankKey(telegramId),
+          JSON.stringify({ accountNumber, bankCode }),
+          'EX',
+          BANK_CONFIRM_TTL_SECONDS,
+        );
+
+        await ctx.reply(
+          `Confirm this is you: ${resolvedName}?`,
+          Markup.inlineKeyboard([
+            Markup.button.callback('✅ Confirm', 'confirm_bank'),
+            Markup.button.callback('❌ Cancel', 'cancel_bank'),
+          ]),
+        );
+      } catch (err) {
+        this.logger.error(`/bank nameEnquiry failed for "${ctx.message.text}":`, err);
+        await ctx.reply("Couldn't verify that account — double-check the details and try again.");
+      }
+    });
+
+    // A photo attached to an in-progress draft — ask which item it belongs to.
+    this.bot.on(message('photo'), async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      const seller = await this.sellersService.findByTelegramId(telegramId);
+      if (!seller) return;
+
+      const raw = await this.redis.get(this.draftKey(telegramId));
+      if (!raw) return; // no active draft — nothing to attach the photo to
+
+      const draft: DraftDeal = JSON.parse(raw);
+      if (!draft.items.length) return;
+
+      const photoSizes = ctx.message.photo;
+      const largest = photoSizes[photoSizes.length - 1];
+
+      try {
+        const fileLink = await ctx.telegram.getFileLink(largest.file_id);
+        const path = `deal-items/${telegramId}-${Date.now()}.jpg`;
+        const imageUrl = await this.storageService.uploadFromUrl(fileLink.toString(), path);
+
+        await this.redis.set(this.pendingPhotoKey(telegramId), imageUrl, 'EX', DRAFT_TTL_SECONDS);
+
+        await ctx.reply(
+          'Which item is this photo for?',
+          Markup.inlineKeyboard(
+            draft.items.map((item, index) => [Markup.button.callback(item.name, `photo_item_${index}`)]),
+          ),
+        );
+      } catch (err) {
+        this.logger.error('Photo upload failed:', err);
+        await ctx.reply("Couldn't process that photo — please try again.");
+      }
+    });
+
     // Natural-language deal creation, or a reply to a pending follow-up question.
     // Must be registered after the command() handlers above — Telegraf's
     // generic text matcher would otherwise swallow every /command message
     // before the command-specific handlers ever get a turn.
-    this.bot.on('text', async (ctx) => {
+    this.bot.on(message('text'), async (ctx) => {
       const telegramId = String(ctx.from.id);
       const seller = await this.sellersService.findByTelegramId(telegramId);
       if (!seller) {
@@ -313,6 +503,25 @@ export class TelegramService implements OnModuleInit {
       }
 
       const state = await this.getState(telegramId);
+
+      if (state === 'AWAITING_OTP') {
+        const input = ctx.message.text.trim();
+        if (!/^\d{6}$/.test(input)) {
+          await ctx.reply("That doesn't look like a 6-digit code — check your email and try again, or /verify to resend.");
+          return;
+        }
+
+        const stored = await this.redis.get(this.otpKey(telegramId));
+        if (stored && stored === input) {
+          await this.sellersService.updateEmailVerified(seller.id);
+          await this.redis.del(this.otpKey(telegramId));
+          await this.setState(telegramId, 'AWAITING_DEAL');
+          await ctx.reply('✅ Email verified!');
+        } else {
+          await ctx.reply("That code doesn't match — try again or /verify to resend.");
+        }
+        return;
+      }
 
       if (state === 'AWAITING_BUYER_PHONE') {
         const { phone, email } = this.parseContactReply(ctx.message.text);
@@ -372,12 +581,68 @@ export class TelegramService implements OnModuleInit {
     this.bot.action('edit_deal', async (ctx) => {
       await ctx.reply('What would you like to change — items, buyer info, or price? Just tell me.');
     });
+
+    this.bot.action('confirm_bank', async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      const seller = await this.sellersService.findByTelegramId(telegramId);
+      if (!seller) {
+        await ctx.reply('Please send your email and business name first to sign up.');
+        return;
+      }
+
+      const raw = await this.redis.get(this.pendingBankKey(telegramId));
+      if (!raw) {
+        await ctx.reply('That confirmation expired — run /bank again.');
+        return;
+      }
+
+      const { accountNumber, bankCode } = JSON.parse(raw);
+      await this.sellersService.updateSettlementAccount(seller.id, accountNumber, bankCode);
+      await this.redis.del(this.pendingBankKey(telegramId));
+      await ctx.reply('✅ Settlement account saved — that\'s where your payouts will go.');
+    });
+
+    this.bot.action('cancel_bank', async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      await this.redis.del(this.pendingBankKey(telegramId));
+      await ctx.reply("Cancelled — run /bank again whenever you're ready.");
+    });
+
+    this.bot.action(/^photo_item_(\d+)$/, async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      const index = Number(ctx.match[1]);
+
+      const imageUrl = await this.redis.get(this.pendingPhotoKey(telegramId));
+      if (!imageUrl) {
+        await ctx.reply('That photo expired — please resend it.');
+        return;
+      }
+
+      const raw = await this.redis.get(this.draftKey(telegramId));
+      if (!raw) {
+        await ctx.reply('This draft expired — please describe the deal again.');
+        return;
+      }
+
+      const draft: DraftDeal = JSON.parse(raw);
+      const item = draft.items[index];
+      if (!item) {
+        await ctx.reply("Couldn't find that item — please try again.");
+        return;
+      }
+
+      item.imageUrl = imageUrl;
+      await this.redis.set(this.draftKey(telegramId), JSON.stringify(draft), 'EX', DRAFT_TTL_SECONDS);
+      await this.redis.del(this.pendingPhotoKey(telegramId));
+
+      await ctx.reply(`Photo added to ${item.name}.`);
+    });
   }
 
   private async sendReview(ctx: any, draft: DraftDeal) {
     const total = draft.items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
     const itemLines = draft.items
-      .map((i) => `${i.name} x${i.quantity} (₦${i.unitPrice.toLocaleString()} each)`)
+      .map((i) => `${i.imageUrl ? '📷 ' : ''}${i.name} x${i.quantity} (₦${i.unitPrice.toLocaleString()} each)`)
       .join('\n');
 
     await ctx.reply(
