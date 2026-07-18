@@ -30,6 +30,7 @@ type ConversationState = 'AWAITING_DEAL' | 'AWAITING_BUYER_PHONE' | 'AWAITING_OT
 const DRAFT_TTL_SECONDS = 60 * 30; // 30 min — abandoned drafts just expire
 const OTP_TTL_SECONDS = 600; // 10 min
 const BANK_CONFIRM_TTL_SECONDS = 600; // 10 min — window to tap Confirm/Cancel after /bank
+const BOT_STARTUP_TIMEOUT_MS = 15_000; // cap on Telegram API calls during boot — a hang shouldn't block the rest of the app
 
 const CHITCHAT_WORDS = new Set(['hi', 'hello', 'hey', 'sup', 'test', 'ok', 'okay', 'thanks', 'thank you']);
 
@@ -101,39 +102,59 @@ export class TelegramService implements OnModuleInit {
     });
 
     try {
-      await this.bot.telegram.setMyCommands([
-        { command: 'start', description: 'Get started / see all commands' },
-        { command: 'add', description: 'Create a deal (guided)' },
-        { command: 'deals', description: 'See all deals in escrow' },
-        { command: 'ship', description: 'Mark a deal as shipped' },
-        { command: 'verify', description: 'Verify your email' },
-        { command: 'bank', description: 'Set your payout account' },
-        { command: 'help', description: 'Show all commands' },
-      ]);
+      await this.withTimeout(
+        this.bot.telegram.setMyCommands([
+          { command: 'start', description: 'Get started / see all commands' },
+          { command: 'add', description: 'Create a deal (guided)' },
+          { command: 'deals', description: 'See all deals in escrow' },
+          { command: 'ship', description: 'Mark a deal as shipped' },
+          { command: 'verify', description: 'Verify your email' },
+          { command: 'bank', description: 'Set your payout account' },
+          { command: 'help', description: 'Show all commands' },
+        ]),
+        BOT_STARTUP_TIMEOUT_MS,
+        'setMyCommands',
+      );
     } catch (err) {
       this.logger.error('Failed to register the bot command menu with Telegram — continuing without it:', err);
     }
 
     this.registerHandlers();
 
-    // Network calls to Telegram's API (launch/setWebhook) can fail transiently —
-    // don't let that take down the rest of the app (DB, HTTP API, dashboard).
+    // Network calls to Telegram's API (launch/setWebhook) can fail or hang —
+    // don't let that block the rest of the app (DB, HTTP API, dashboard) from starting.
     try {
       const useWebhook = this.config.get<string>('TELEGRAM_USE_WEBHOOK') === 'true';
       if (useWebhook) {
         const webhookUrl = this.config.get<string>('TELEGRAM_WEBHOOK_URL');
         if (webhookUrl) {
-          await this.bot.telegram.setWebhook(webhookUrl);
+          await this.withTimeout(this.bot.telegram.setWebhook(webhookUrl), BOT_STARTUP_TIMEOUT_MS, 'setWebhook');
         } else {
           this.logger.warn('TELEGRAM_USE_WEBHOOK is true but TELEGRAM_WEBHOOK_URL is not set — webhook not registered');
         }
       } else {
-        await this.bot.launch();
+        await this.withTimeout(this.bot.launch(), BOT_STARTUP_TIMEOUT_MS, 'bot.launch');
         this.logger.log('Telegram bot launched in polling mode');
       }
     } catch (err) {
       this.logger.error('Failed to start the Telegram bot — the rest of the app will still start:', err);
     }
+  }
+
+  /** Races a promise against a timeout so a hung network call can't block app startup indefinitely. */
+  private withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      promise
+        .then((value) => {
+          clearTimeout(timer);
+          resolve(value);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
   }
 
   private draftKey(telegramId: string) {
@@ -168,6 +189,11 @@ export class TelegramService implements OnModuleInit {
 
   private looksLikePhoneNumber(text: string): boolean {
     return /^\+?[\d\s()-]{7,15}$/.test(text.trim());
+  }
+
+  /** Escapes user-controlled text before interpolating it into a parse_mode: 'HTML' message. */
+  private escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   /** Pulls an email and a phone number out of a free-text follow-up reply. */
@@ -306,7 +332,7 @@ export class TelegramService implements OnModuleInit {
       await this.handleNaturalLanguageDeal(ctx, telegramId, text);
     });
 
-    // Lists everything currently in escrow, grouped by status.
+    // Lists everything currently in escrow, one card per deal, grouped by status.
     this.bot.command('deals', async (ctx) => {
       const seller = await this.sellersService.findByTelegramId(String(ctx.from.id));
       if (!seller) {
@@ -323,44 +349,52 @@ export class TelegramService implements OnModuleInit {
         return;
       }
 
+      const fmtDate = (d?: Date | null) =>
+        d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '-';
+
       const awaitingShipment = live.filter((d) => d.status === DealStatus.PAID);
       const shipped = live.filter((d) => d.status === DealStatus.SHIPPED);
       const disputed = live.filter((d) => d.status === DealStatus.DISPUTED);
 
-      const formatRow = (code: string, buyer: string, amount: string, extra: string) =>
-        `${code.padEnd(7)}${buyer.slice(0, 10).padEnd(11)}₦${amount.padEnd(9)}${extra}`;
-
-      let message = '';
+      let message = `<b>Deals in escrow (${live.length})</b>\n`;
+      const copyButtons: { text: string; copy_text: { text: string } }[][] = [];
 
       if (awaitingShipment.length) {
-        message += '📦 <b>Paid — awaiting shipment</b>\n<pre>';
-        message += 'Code   Buyer      Amount    \n';
+        message += `\n📦 <b>Paid — awaiting shipment</b>\n`;
         for (const d of awaitingShipment) {
-          message += formatRow(d.shortCode, d.buyerName ?? d.buyerPhone, Number(d.amount).toLocaleString(), '') + '\n';
+          message +=
+            `\n<b>${d.shortCode}</b> — ${this.escapeHtml(d.buyerName ?? d.buyerPhone)}\n` +
+            `₦${Number(d.amount).toLocaleString()} · Paid ${fmtDate(d.paidAt)}\n`;
+          copyButtons.push([{ text: `📋 Copy ${d.shortCode}`, copy_text: { text: d.shortCode } }]);
         }
-        message += '</pre>\nMark shipped: /ship &lt;code&gt; [date]\n\n';
+        message += `<i>Mark shipped: /ship &lt;code&gt; [date]</i>\n`;
       }
 
       if (shipped.length) {
-        message += '🚚 <b>Shipped — awaiting buyer confirmation</b>\n<pre>';
-        message += 'Code   Buyer      Amount     ETA\n';
+        message += `\n🚚 <b>Shipped — awaiting buyer confirmation</b>\n`;
         for (const d of shipped) {
-          const eta = d.estimatedDeliveryDate ? new Date(d.estimatedDeliveryDate).toLocaleDateString() : '-';
-          message += formatRow(d.shortCode, d.buyerName ?? d.buyerPhone, Number(d.amount).toLocaleString(), eta) + '\n';
+          message +=
+            `\n<b>${d.shortCode}</b> — ${this.escapeHtml(d.buyerName ?? d.buyerPhone)}\n` +
+            `₦${Number(d.amount).toLocaleString()} · ETA ${fmtDate(d.estimatedDeliveryDate)} · Releases ${fmtDate(d.autoReleaseDeadline)}\n`;
+          copyButtons.push([{ text: `📋 Copy ${d.shortCode}`, copy_text: { text: d.shortCode } }]);
         }
-        message += '</pre>\n\n';
+        message += `<i>If the buyer doesn't respond by the release date, funds are automatically released to you.</i>\n`;
       }
 
       if (disputed.length) {
-        message += '⚠️ <b>Disputed</b>\n<pre>';
-        message += 'Code   Buyer      Amount    \n';
+        message += `\n⚠️ <b>Disputed</b>\n`;
         for (const d of disputed) {
-          message += formatRow(d.shortCode, d.buyerName ?? d.buyerPhone, Number(d.amount).toLocaleString(), '') + '\n';
+          message +=
+            `\n<b>${d.shortCode}</b> — ${this.escapeHtml(d.buyerName ?? d.buyerPhone)}\n` +
+            `₦${Number(d.amount).toLocaleString()} · Paid ${fmtDate(d.paidAt)}\n`;
+          copyButtons.push([{ text: `📋 Copy ${d.shortCode}`, copy_text: { text: d.shortCode } }]);
         }
-        message += '</pre>';
       }
 
-      await ctx.reply(message, { parse_mode: 'HTML' });
+      await ctx.reply(message, {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: copyButtons } as any,
+      });
     });
 
     // Seller marks a paid deal as shipped, e.g. "/ship A3F9K2 2026-07-20"
