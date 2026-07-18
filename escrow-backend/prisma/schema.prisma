@@ -94,6 +94,7 @@ model Deal {
 
   status DealStatus @default(CREATED)
 
+  paidAt                DateTime?
   estimatedDeliveryDate DateTime?
   shippedAt             DateTime?
   autoReleaseDeadline   DateTime? // computed when marked SHIPPED — scheduler checks this

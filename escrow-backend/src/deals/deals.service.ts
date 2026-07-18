@@ -12,9 +12,10 @@ import { TelegramService } from "../telegram/telegram.service";
 import { CreateDealDto } from "./dto/create-deal.dto";
 import { DealEventActor, DealStatus, Prisma } from "@prisma/client";
 
-// Days a buyer has to respond after a deal is marked SHIPPED before
-// funds auto-release. Mirrors Alipay/Taobao's confirmation-window pattern.
-const AUTO_RELEASE_DAYS = 5;
+// Buyer's confirmation window, counted from the estimated delivery date
+// (or from the shipped date if no ETA was given) — mirrors Alipay/Taobao's
+// pattern of counting from delivery, not from when the seller merely ships.
+const AUTO_RELEASE_BUFFER_DAYS = 7;
 
 @Injectable()
 export class DealsService {
@@ -96,6 +97,7 @@ export class DealsService {
     const deal = await this.getOrThrow(dealId);
     if (deal.status !== DealStatus.CREATED) return deal; // idempotency guard
 
+    await this.prisma.deal.update({ where: { id: dealId }, data: { paidAt: new Date() } });
     const updated = await this.transition(
       dealId,
       DealStatus.PAID,
@@ -126,8 +128,9 @@ export class DealsService {
       );
     }
 
-    const deadline = new Date();
-    deadline.setDate(deadline.getDate() + AUTO_RELEASE_DAYS);
+    const baseDate = estimatedDeliveryDate ?? new Date();
+    const deadline = new Date(baseDate);
+    deadline.setDate(deadline.getDate() + AUTO_RELEASE_BUFFER_DAYS);
 
     await this.prisma.deal.update({
       where: { id: dealId },
@@ -235,7 +238,7 @@ export class DealsService {
       dealId,
       DealStatus.AUTO_RELEASED,
       DealEventActor.SYSTEM,
-      `No buyer response after ${AUTO_RELEASE_DAYS}-day window — auto-released`,
+      `No buyer response within ${AUTO_RELEASE_BUFFER_DAYS} days of the delivery window — auto-released`,
     );
     return this.releaseFunds(dealId);
   }
