@@ -6,14 +6,26 @@ export default function CheckoutPage() {
   const { dealId } = useParams();
   const [deal, setDeal] = useState<PublicDeal | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!dealId) return;
-    publicDealApi.get(dealId).then(setDeal).finally(() => setLoading(false));
+    publicDealApi
+      .get(dealId)
+      .then(setDeal)
+      .catch((err) => {
+        console.error('Failed to load deal', err);
+        setError(
+          err?.response?.status === 404
+            ? 'Deal not found'
+            : "Couldn't reach the server — please check your connection and try again.",
+        );
+      })
+      .finally(() => setLoading(false));
   }, [dealId]);
 
   if (loading) return <div className="p-10 text-center text-gray-400">Loading…</div>;
-  if (!deal) return <div className="p-10 text-center text-gray-400">Deal not found</div>;
+  if (error || !deal) return <div className="p-10 text-center text-gray-400">{error ?? 'Deal not found'}</div>;
 
   return (
     <div className="min-h-screen bg-gray-50 flex justify-center p-6">
