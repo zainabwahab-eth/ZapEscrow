@@ -9,7 +9,7 @@ import { AiService } from '../ai/ai.service';
 import { EmailService } from '../email/email.service';
 import { StorageService } from '../storage/storage.service';
 import { MonnifyService } from '../monnify/monnify.service';
-import { DealStatus } from '@prisma/client';
+import { DealStatus } from '../generated/prisma/client';
 
 interface DraftDealItem {
   name: string;

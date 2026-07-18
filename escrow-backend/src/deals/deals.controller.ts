@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { DealsService } from './deals.service';
 import { CreateDealDto } from './dto/create-deal.dto';
-import { DealStatus } from '@prisma/client';
+import { DealStatus } from '../generated/prisma/client';
 
 @Controller('deals')
 export class DealsController {

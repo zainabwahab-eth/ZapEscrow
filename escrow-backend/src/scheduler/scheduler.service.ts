@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DealsService } from '../deals/deals.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { AiService } from '../ai/ai.service';
-import { DealStatus } from '@prisma/client';
+import { DealStatus } from '../generated/prisma/client';
 
 @Injectable()
 export class SchedulerService {

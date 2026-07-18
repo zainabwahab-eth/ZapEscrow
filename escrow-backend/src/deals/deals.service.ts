@@ -10,7 +10,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { MonnifyService } from "../monnify/monnify.service";
 import { TelegramService } from "../telegram/telegram.service";
 import { CreateDealDto } from "./dto/create-deal.dto";
-import { DealEventActor, DealStatus, Prisma } from "@prisma/client";
+import { DealEventActor, DealStatus, Prisma } from "../generated/prisma/client";
 
 // Buyer's confirmation window, counted from the estimated delivery date
 // (or from the shipped date if no ETA was given) — mirrors Alipay/Taobao's
