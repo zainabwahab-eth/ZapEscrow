@@ -101,7 +101,7 @@ export class MonnifyService {
           currencyCode: "NGN",
           contractCode: this.config.get<string>("MONNIFY_CONTRACT_CODE"),
           redirectUrl: `${this.config.get<string>("PUBLIC_FRONTEND_URL")}/pay/${params.dealId}/complete`,
-          paymentMethods: ["ACCOUNT_TRANSFER"],
+          paymentMethods: ["ACCOUNT_TRANSFER", "CARD", "USSD"],
         },
         { headers: { Authorization: `Bearer ${token}` } },
       ),
