@@ -6,7 +6,7 @@ import { TelegramModule } from '../telegram/telegram.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [MonnifyModule, forwardRef(() => TelegramModule), NotificationsModule],
+  imports: [forwardRef(() => MonnifyModule), forwardRef(() => TelegramModule), NotificationsModule],
   controllers: [DealsController],
   providers: [DealsService],
   exports: [DealsService],

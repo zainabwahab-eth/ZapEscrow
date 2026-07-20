@@ -23,6 +23,7 @@ export interface DealItem {
 
 export interface Deal {
   id: string;
+  shortCode: string;
   buyerName?: string;
   buyerPhone: string;
   buyerEmail?: string;
@@ -116,4 +117,37 @@ export const sellersApi = {
 
   updateOnboarding: (params: { businessName: string; phone: string; salesChannels: string[] }) =>
     api.patch<Seller>('/sellers/onboarding', params).then((r) => r.data),
+
+  updateProfile: (params: { businessName: string; phone: string }) =>
+    api.patch<Seller>('/sellers/me', params).then((r) => r.data),
+
+  updateSettlementAccount: (sellerId: string, accountNumber: string, bankCode: string) =>
+    api
+      .patch<Seller>(`/sellers/${sellerId}/settlement-account`, { accountNumber, bankCode })
+      .then((r) => r.data),
+};
+
+export const monnifyApi = {
+  nameEnquiry: (accountNumber: string, bankCode: string) =>
+    api
+      .get<{ accountName: string | null }>('/monnify/name-enquiry', {
+        params: { account: accountNumber, bank: bankCode },
+      })
+      .then((r) => r.data),
+};
+
+export interface Notification {
+  id: string;
+  sellerId: string;
+  type: 'DISBURSEMENT_MISSING' | 'FUNDS_RELEASED' | 'DISPUTE_ALERT' | 'DEAL_PAID' | string;
+  channel: string;
+  payload?: { dealId?: string; amount?: string; code?: string } | null;
+  read: boolean;
+  sentAt: string;
+}
+
+export const notificationsApi = {
+  list: () => api.get<Notification[]>('/notifications').then((r) => r.data),
+  markRead: (id: string) => api.patch(`/notifications/${id}/read`).then((r) => r.data),
+  markAllRead: () => api.patch('/notifications/read-all').then((r) => r.data),
 };

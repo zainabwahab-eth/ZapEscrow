@@ -14,7 +14,7 @@ import { MonnifyModule } from '../monnify/monnify.module';
     AiModule,
     EmailModule,
     StorageModule,
-    MonnifyModule,
+    forwardRef(() => MonnifyModule),
   ],
   providers: [TelegramService],
   exports: [TelegramService],

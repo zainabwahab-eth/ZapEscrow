@@ -99,6 +99,16 @@ export class SellersService {
     });
   }
 
+  async updateProfile(id: string, params: { businessName: string; phone: string }) {
+    return this.prisma.seller.update({
+      where: { id },
+      data: {
+        businessName: params.businessName,
+        phone: params.phone,
+      },
+    });
+  }
+
   /** Strips sensitive fields before a seller record is returned to the client. */
   toPublic(seller: Seller) {
     const { passwordHash, ...rest } = seller;

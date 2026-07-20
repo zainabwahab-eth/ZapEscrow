@@ -1,10 +1,14 @@
 import { Routes, Route, Navigate, type ReactElement } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/auth';
+import DashboardLayout from './components/DashboardLayout';
 import LandingPage from './pages/LandingPage';
 import SignupPage from './pages/SignupPage';
 import LoginPage from './pages/LoginPage';
 import OnboardingPage from './pages/OnboardingPage';
-import DashboardPage from './pages/DashboardPage';
+import DashboardHomePage from './pages/DashboardHomePage';
+import DealsPage from './pages/DealsPage';
+import InvoicingPage from './pages/InvoicingPage';
+import SettingsPage from './pages/SettingsPage';
 import CheckoutPage from './pages/CheckoutPage';
 import PaymentCompletePage from './pages/PaymentCompletePage';
 
@@ -30,13 +34,17 @@ export default function App() {
           }
         />
         <Route
-          path="/dashboard"
           element={
             <ProtectedRoute>
-              <DashboardPage />
+              <DashboardLayout />
             </ProtectedRoute>
           }
-        />
+        >
+          <Route path="/dashboard" element={<DashboardHomePage />} />
+          <Route path="/deals" element={<DealsPage />} />
+          <Route path="/invoicing" element={<InvoicingPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Route>
         <Route path="/pay/:dealId" element={<CheckoutPage />} />
         <Route path="/pay/:dealId/complete" element={<PaymentCompletePage />} />
       </Routes>

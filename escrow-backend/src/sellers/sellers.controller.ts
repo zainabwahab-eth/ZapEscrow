@@ -27,6 +27,14 @@ export class SellersController {
       .then((seller) => this.sellersService.toPublic(seller));
   }
 
+  @Patch('me')
+  @UseGuards(JwtAuthGuard)
+  updateProfile(@Req() req: any, @Body() body: { businessName: string; phone: string }) {
+    return this.sellersService
+      .updateProfile(req.sellerId, body)
+      .then((seller) => this.sellersService.toPublic(seller));
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.sellersService.findById(id);
