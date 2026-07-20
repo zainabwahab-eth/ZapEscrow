@@ -124,6 +124,20 @@ export class DealsService {
   /** Seller marks the item shipped — starts the auto-release clock. */
   async markShipped(dealId: string, estimatedDeliveryDate?: Date) {
     const deal = await this.getOrThrow(dealId);
+
+    // Already shipped — treat this as an ETA update rather than rejecting
+    // it, so sellers can correct a delivery estimate with the same command.
+    if (deal.status === DealStatus.SHIPPED) {
+      const baseDate = estimatedDeliveryDate ?? deal.estimatedDeliveryDate ?? new Date();
+      const deadline = new Date(baseDate);
+      deadline.setDate(deadline.getDate() + AUTO_RELEASE_BUFFER_DAYS);
+
+      return this.prisma.deal.update({
+        where: { id: dealId },
+        data: { estimatedDeliveryDate, autoReleaseDeadline: deadline },
+      });
+    }
+
     if (deal.status !== DealStatus.PAID) {
       throw new BadRequestException(
         "Deal must be PAID before it can be marked shipped",

@@ -34,6 +34,8 @@ const BOT_STARTUP_TIMEOUT_MS = 15_000; // cap on Telegram API calls during boot 
 
 const CHITCHAT_WORDS = new Set(['hi', 'hello', 'hey', 'sup', 'test', 'ok', 'okay', 'thanks', 'thank you']);
 
+const EMAIL_PATTERN = /[^\s]+@[^\s]+\.[^\s]+/;
+
 // Common Nigerian banks/fintechs a seller is likely to type, mapped to their
 // NIBSS/Monnify bank codes. Keys are normalized (lowercase, no spaces).
 const BANK_NAME_TO_CODE: Record<string, string> = {
@@ -62,6 +64,10 @@ export class TelegramService implements OnModuleInit {
   private bot: Telegraf;
   private redis: Redis;
 
+  private readonly introText =
+    "ZapEscrow holds your buyer's payment safely until they confirm they've received their order, " +
+    "then releases it to you automatically. No more chasing payments or losing sales to distrustful buyers.\n\n";
+
   private readonly commandReference =
     "<b>Here's what I can do:</b>\n\n" +
     '📝 <b>Create a deal</b>\n' +
@@ -69,8 +75,9 @@ export class TelegramService implements OnModuleInit {
     'Or use /add for a guided version.\n\n' +
     '📦 <b>Manage deals</b>\n' +
     '/deals — see everything currently in escrow\n' +
-    '/ship &lt;code&gt; [estimated arrival date] — mark a deal as shipped, e.g. /ship A3F9K2 2026-07-20\n\n' +
+    '/ship &lt;code&gt; [estimated arrival date] — mark a deal as shipped, e.g. /ship A3F9K2 2026-07-20 (run it again on a shipped deal to update the estimate)\n\n' +
     '👤 <b>Account</b>\n' +
+    '/profile — view your account details\n' +
     '/verify — verify your email\n' +
     '/bank &lt;account number&gt; &lt;bank name&gt; — set where payouts get sent\n\n' +
     '❓ /help — show this message again';
@@ -109,6 +116,7 @@ export class TelegramService implements OnModuleInit {
           { command: 'add', description: 'Create a deal (guided)' },
           { command: 'deals', description: 'See all deals in escrow' },
           { command: 'ship', description: 'Mark a deal as shipped' },
+          { command: 'profile', description: 'View your account details' },
           { command: 'verify', description: 'Verify your email' },
           { command: 'bank', description: 'Set your payout account' },
           { command: 'help', description: 'Show all commands' },
@@ -176,6 +184,10 @@ export class TelegramService implements OnModuleInit {
 
   private pendingPhotoKey(telegramId: string) {
     return `photo-pending:${telegramId}`;
+  }
+
+  private pendingSignupKey(telegramId: string) {
+    return `signup-pending:${telegramId}`;
   }
 
   private async setState(telegramId: string, state: ConversationState) {
@@ -287,25 +299,39 @@ export class TelegramService implements OnModuleInit {
       if (!seller) {
         await ctx.reply(
           "Welcome! Send me your email and business name to get started, e.g.\n" +
-            '"musa@example.com, Musa Fashion Store"',
+            '"musa@example.com Musa Fashion Store"',
         );
       }
-      await ctx.reply(this.commandReference, { parse_mode: 'HTML' });
+      await ctx.reply(this.introText + this.commandReference, { parse_mode: 'HTML' });
     });
 
     this.bot.help(async (ctx) => {
-      await ctx.reply(this.commandReference, { parse_mode: 'HTML' });
+      await ctx.reply(this.introText + this.commandReference, { parse_mode: 'HTML' });
     });
 
-    // Very naive seller onboarding — a real build should validate this properly.
-    this.bot.hears(/@.+,.+/, async (ctx) => {
-      const [email, businessName] = ctx.message.text.split(',').map((s) => s.trim());
-      const seller = await this.sellersService.createFromTelegram({
-        email,
-        businessName,
-        telegramId: String(ctx.from.id),
-      });
-      await this.setState(String(ctx.from.id), 'AWAITING_DEAL');
+    // Seller onboarding — matches an email anywhere in the message; whatever
+    // text is left over (comma or no comma) becomes the business name. If
+    // nothing's left over, we ask for it as a follow-up instead of failing.
+    this.bot.hears(EMAIL_PATTERN, async (ctx, next) => {
+      const text = ctx.message.text;
+      if (text.startsWith('/')) return next(); // let command handlers (e.g. /add with a buyer email) take this
+
+      const telegramId = String(ctx.from.id);
+      const existing = await this.sellersService.findByTelegramId(telegramId);
+      if (existing) return next(); // already signed up — likely a deal message that happens to mention an email
+
+      const emailMatch = text.match(EMAIL_PATTERN);
+      const email = emailMatch![0];
+      const businessName = text.replace(email, ' ').replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+
+      if (!businessName) {
+        await this.redis.set(this.pendingSignupKey(telegramId), email, 'EX', OTP_TTL_SECONDS);
+        await ctx.reply("What's your business name?");
+        return;
+      }
+
+      const seller = await this.sellersService.createFromTelegram({ email, businessName, telegramId });
+      await this.setState(telegramId, 'AWAITING_DEAL');
       await ctx.reply(
         `You're set up, ${seller.businessName}! Let's verify your email next — run /verify.\n\n` +
           'Once verified, describe a deal, e.g.\n"sold 2 phone cases to Musa for 3000 each and a charger for 2000"',
@@ -417,14 +443,31 @@ export class TelegramService implements OnModuleInit {
 
       try {
         const deal = await this.dealsService.findByShortCode(shortCode);
+        const wasAlreadyShipped = deal.status === DealStatus.SHIPPED;
         const updated = await this.dealsService.markShipped(deal.id, eta);
-        await ctx.reply(
-          `📦 Deal ${updated.shortCode} marked as shipped${etaStr ? ` — estimated delivery ${etaStr}` : ''}. We'll let the buyer know.`,
-        );
+        const reply = wasAlreadyShipped
+          ? `📦 Updated the delivery estimate for ${updated.shortCode}${etaStr ? ` — now ${etaStr}` : ''}.`
+          : `📦 Deal ${updated.shortCode} marked as shipped${etaStr ? ` — estimated delivery ${etaStr}` : ''}. We'll let the buyer know.`;
+        await ctx.reply(reply);
       } catch (err) {
         this.logger.error(`/ship failed for "${ctx.message.text}":`, err);
         await ctx.reply("Couldn't mark that deal as shipped — check the deal code and try again.");
       }
+    });
+
+    // Shows the seller their own account details.
+    this.bot.command('profile', async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      const seller = await this.sellersService.findByTelegramId(telegramId);
+      if (!seller) {
+        await ctx.reply('Please send your email and business name first to sign up.');
+        return;
+      }
+
+      await ctx.reply(
+        `<b>Your profile</b>\nEmail: ${this.escapeHtml(seller.email)}\nBusiness name: ${this.escapeHtml(seller.businessName)}`,
+        { parse_mode: 'HTML' },
+      );
     });
 
     // Sends a 6-digit code to the seller's email and puts them in AWAITING_OTP state.
@@ -553,6 +596,29 @@ export class TelegramService implements OnModuleInit {
     // before the command-specific handlers ever get a turn.
     this.bot.on(message('text'), async (ctx) => {
       const telegramId = String(ctx.from.id);
+
+      const pendingEmail = await this.redis.get(this.pendingSignupKey(telegramId));
+      if (pendingEmail) {
+        const businessName = ctx.message.text.trim();
+        if (!businessName) {
+          await ctx.reply("What's your business name?");
+          return;
+        }
+
+        const seller = await this.sellersService.createFromTelegram({
+          email: pendingEmail,
+          businessName,
+          telegramId,
+        });
+        await this.redis.del(this.pendingSignupKey(telegramId));
+        await this.setState(telegramId, 'AWAITING_DEAL');
+        await ctx.reply(
+          `You're set up, ${seller.businessName}! Let's verify your email next — run /verify.\n\n` +
+            'Once verified, describe a deal, e.g.\n"sold 2 phone cases to Musa for 3000 each and a charger for 2000"',
+        );
+        return;
+      }
+
       const seller = await this.sellersService.findByTelegramId(telegramId);
       if (!seller) {
         await ctx.reply('Please send your email and business name first to sign up.');
@@ -693,6 +759,10 @@ export class TelegramService implements OnModuleInit {
       await this.redis.del(this.pendingPhotoKey(telegramId));
 
       await ctx.reply(`Photo added to ${item.name}.`);
+      // Re-show the review card with Confirm/Edit buttons so the seller can
+      // proceed immediately, instead of needing to type a follow-up message
+      // that the AWAITING_DEAL text handler wouldn't recognize as "confirm".
+      await this.sendReview(ctx, draft);
     });
   }
 
