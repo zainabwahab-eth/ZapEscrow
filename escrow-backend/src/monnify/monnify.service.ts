@@ -126,6 +126,22 @@ export class MonnifyService {
     return data;
   }
 
+  /** Full list of supported banks, for populating a real dropdown instead of a hardcoded list. */
+  async getBanks(): Promise<{ name: string; code: string; logo?: string }[]> {
+    const token = await this.getAccessToken();
+    const { data } = await firstValueFrom(
+      this.http.get<{ responseBody: any[] }>(`${this.baseUrl}/api/v1/banks`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+
+    return (data.responseBody ?? []).map((bank) => ({
+      name: bank.name ?? bank.bankName,
+      code: bank.code ?? bank.bankCode,
+      ...(bank.logo ? { logo: bank.logo } : {}),
+    }));
+  }
+
   /** Look up an account name before disbursing — required to avoid failed transfers. */
   async nameEnquiry(accountNumber: string, bankCode: string) {
     const token = await this.getAccessToken();

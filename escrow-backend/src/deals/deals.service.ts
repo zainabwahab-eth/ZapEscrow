@@ -6,10 +6,12 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../prisma/prisma.service";
 import { MonnifyService } from "../monnify/monnify.service";
 import { TelegramService } from "../telegram/telegram.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { EmailService } from "../email/email.service";
 import { CreateDealDto } from "./dto/create-deal.dto";
 import { DealEventActor, DealStatus, Prisma } from "../generated/prisma/client";
 
@@ -28,6 +30,8 @@ export class DealsService {
     @Inject(forwardRef(() => TelegramService))
     private readonly telegramService: TelegramService,
     private readonly notificationsService: NotificationsService,
+    private readonly emailService: EmailService,
+    private readonly config: ConfigService,
   ) {}
 
   /** Step after the seller confirms the review screen — creates the deal + Monnify checkout. */
@@ -110,6 +114,14 @@ export class DealsService {
     const seller = await this.prisma.seller.findUnique({
       where: { id: deal.sellerId },
     });
+
+    await this.notificationsService.create({
+      sellerId: deal.sellerId,
+      type: "DEAL_PAID",
+      channel: "IN_APP",
+      payload: { dealId, amount: deal.amount.toString() },
+    });
+
     if (seller?.telegramId) {
       const buyerLabel = deal.buyerName || deal.buyerPhone;
       await this.telegramService.sendMessage(
@@ -157,12 +169,23 @@ export class DealsService {
       },
     });
 
-    return this.transition(
+    const updated = await this.transition(
       dealId,
       DealStatus.SHIPPED,
       DealEventActor.SELLER,
       "Marked shipped",
     );
+
+    if (deal.buyerEmail) {
+      const seller = await this.prisma.seller.findUnique({ where: { id: deal.sellerId } });
+      const dealUrl = `${this.config.get<string>("PUBLIC_FRONTEND_URL", "")}/pay/${dealId}`;
+      await this.emailService.sendShippedNotice(deal.buyerEmail, {
+        sellerName: seller?.businessName ?? "the seller",
+        dealUrl,
+      });
+    }
+
+    return updated;
   }
 
   /** Buyer confirms receipt — triggers fund release. */
@@ -298,13 +321,55 @@ export class DealsService {
       );
     }
 
-    const transfer = await this.monnify.releaseSingleTransfer({
-      amount: Number(deal.amount),
-      destinationAccountNumber: deal.seller.monnifySettlementAccount,
-      destinationBankCode: deal.seller.monnifySettlementBankCode,
-      destinationAccountName: deal.seller.businessName,
-      dealId: deal.id,
-    });
+    let transfer: Awaited<ReturnType<MonnifyService["releaseSingleTransfer"]>>;
+    try {
+      transfer = await this.monnify.releaseSingleTransfer({
+        amount: Number(deal.amount),
+        destinationAccountNumber: deal.seller.monnifySettlementAccount,
+        destinationBankCode: deal.seller.monnifySettlementBankCode,
+        destinationAccountName: deal.seller.businessName,
+        dealId: deal.id,
+      });
+    } catch (err) {
+      // The disbursement call itself failed (bad bank code, Monnify rejection,
+      // network error, etc). This is reachable from the unauthenticated public
+      // buyer confirm/dispute routes now, so a Monnify-side failure must never
+      // surface as an error to the buyer — the deal still transitions to
+      // RELEASED (their confirmation is valid), and the payout failure is
+      // recorded/flagged for the seller to sort out separately.
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`releaseSingleTransfer failed for deal ${dealId}: ${message}`, err instanceof Error ? err.stack : undefined);
+
+      await this.prisma.disbursement.create({
+        data: {
+          dealId,
+          monnifyReference: `failed-${dealId}-${Date.now()}`,
+          amount: deal.amount,
+          status: "FAILED",
+        },
+      });
+
+      await this.notificationsService.create({
+        sellerId: deal.sellerId,
+        type: "FAILED_DISBURSEMENT",
+        channel: "IN_APP",
+        payload: { dealId, amount: deal.amount.toString() },
+      });
+
+      if (deal.seller.telegramId) {
+        await this.telegramService.sendMessage(
+          deal.seller.telegramId,
+          `⚠️ Your payout for ${deal.shortCode} hit a snag — we're on it.`,
+        );
+      }
+
+      return this.transition(
+        dealId,
+        DealStatus.RELEASED,
+        DealEventActor.SYSTEM,
+        "Release recorded — disbursement failed and needs manual follow-up",
+      );
+    }
 
     await this.prisma.disbursement.create({
       data: {
@@ -451,6 +516,41 @@ export class DealsService {
     });
   }
 
+  /** Used by the scheduler to find shipped deals nearing their deadline that haven't been nudged yet. */
+  async findNearingDeadline() {
+    const twoDaysFromNow = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    return this.prisma.deal.findMany({
+      where: {
+        status: DealStatus.SHIPPED,
+        autoReleaseDeadline: { lte: twoDaysFromNow, gt: new Date() },
+        reminderSentAt: null,
+        buyerEmail: { not: null },
+      },
+    });
+  }
+
+  /** Sends the "did you receive this?" nudge email and marks it sent so it doesn't repeat hourly. */
+  async sendDeliveryReminder(dealId: string) {
+    const deal = await this.prisma.deal.findUnique({ where: { id: dealId }, include: { seller: true } });
+    if (!deal || !deal.buyerEmail) return;
+
+    const dealUrl = `${this.config.get<string>("PUBLIC_FRONTEND_URL", "")}/pay/${dealId}`;
+    await this.emailService.sendDeliveryReminder(deal.buyerEmail, {
+      sellerName: deal.seller.businessName,
+      dealUrl,
+    });
+    await this.prisma.deal.update({ where: { id: dealId }, data: { reminderSentAt: new Date() } });
+  }
+
+  /** Admin queue: all deals currently in dispute, with their Dispute record. */
+  async listDisputes() {
+    return this.prisma.deal.findMany({
+      where: { status: DealStatus.DISPUTED },
+      include: { items: true, dispute: true, seller: { select: { businessName: true } } },
+      orderBy: { disputedAt: "desc" },
+    });
+  }
+
   /** Public buyer-facing checkout page — no seller-sensitive data included. */
   async getPublicDealView(dealId: string) {
     const deal = await this.prisma.deal.findUnique({
@@ -470,6 +570,9 @@ export class DealsService {
       amount: deal.amount,
       status: deal.status,
       checkoutUrl: deal.checkoutUrl,
+      shippedAt: deal.shippedAt,
+      estimatedDeliveryDate: deal.estimatedDeliveryDate,
+      autoReleaseDeadline: deal.autoReleaseDeadline,
       items: deal.items.map((i) => ({
         name: i.name,
         imageUrl: i.imageUrl,

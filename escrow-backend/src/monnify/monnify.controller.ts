@@ -14,4 +14,11 @@ export class MonnifyController {
     const result = await this.monnifyService.nameEnquiry(account, bank);
     return { accountName: result?.responseBody?.accountName ?? null };
   }
+
+  // Populates the Settings page's bank dropdown with the real supported list.
+  @Get('banks')
+  @UseGuards(JwtAuthGuard)
+  getBanks() {
+    return this.monnifyService.getBanks();
+  }
 }

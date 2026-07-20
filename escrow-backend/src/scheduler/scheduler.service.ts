@@ -82,8 +82,14 @@ export class SchedulerService {
       this.logger.log(`Auto-released ${pastDeadline.length} deals past deadline`);
     }
 
-    // TODO: also query deals approaching (but not past) their deadline and
-    // send a "did you receive this? reply YES or NO" reminder — needs a
-    // `reminder_sent_at` style flag to avoid re-pinging every hour.
+    // Deals approaching (but not past) their deadline — send a "did you
+    // receive this?" email nudge once, tracked via reminderSentAt.
+    const nearingDeadline = await this.dealsService.findNearingDeadline();
+    for (const deal of nearingDeadline) {
+      await this.dealsService.sendDeliveryReminder(deal.id);
+    }
+    if (nearingDeadline.length) {
+      this.logger.log(`Sent delivery reminder emails for ${nearingDeadline.length} deals nearing deadline`);
+    }
   }
 }
