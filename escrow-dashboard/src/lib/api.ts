@@ -1,7 +1,16 @@
 import axios from 'axios';
+import { getAuthToken } from './auth';
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
+});
+
+api.interceptors.request.use((config) => {
+  const token = getAuthToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 export interface DealItem {
@@ -69,4 +78,42 @@ export interface PublicDeal {
 
 export const publicDealApi = {
   get: (dealId: string) => api.get<PublicDeal>(`/deals/${dealId}/public`).then((r) => r.data),
+};
+
+export interface Seller {
+  id: string;
+  email: string;
+  phone?: string | null;
+  businessName: string;
+  telegramId?: string | null;
+  monnifySettlementAccount?: string | null;
+  monnifySettlementBankCode?: string | null;
+  verifiedBadge: boolean;
+  emailVerifiedAt?: string | null;
+  salesChannels: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const authApi = {
+  signupStart: (email: string) =>
+    api.post<{ message: string }>('/auth/signup/start', { email }).then((r) => r.data),
+
+  verifyOtp: (email: string, code: string) =>
+    api.post<{ verifiedToken: string }>('/auth/signup/verify-otp', { email, code }).then((r) => r.data),
+
+  completeSignup: (email: string, password: string, verifiedToken: string) =>
+    api
+      .post<{ token: string; seller: Seller }>('/auth/signup/complete', { email, password, verifiedToken })
+      .then((r) => r.data),
+
+  login: (email: string, password: string) =>
+    api.post<{ token: string; seller: Seller }>('/auth/login', { email, password }).then((r) => r.data),
+};
+
+export const sellersApi = {
+  me: () => api.get<Seller>('/sellers/me').then((r) => r.data),
+
+  updateOnboarding: (params: { businessName: string; phone: string; salesChannels: string[] }) =>
+    api.patch<Seller>('/sellers/onboarding', params).then((r) => r.data),
 };

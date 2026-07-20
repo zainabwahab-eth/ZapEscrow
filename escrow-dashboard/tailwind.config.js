@@ -7,7 +7,13 @@ export default {
         escrow: {
           teal: '#0F766E',
           coral: '#E4572E',
+          cream: '#FAF6EF',
+          ink: '#211F1D',
         },
+      },
+      fontFamily: {
+        fraunces: ['Fraunces', 'ui-serif', 'Georgia', 'serif'],
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
     },
   },

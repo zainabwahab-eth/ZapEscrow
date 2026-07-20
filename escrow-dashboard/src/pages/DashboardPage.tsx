@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { dealsApi, type Deal, type SellerTotals } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import TotalsCards from '../components/TotalsCards';
 import DealsTable from '../components/DealsTable';
 
-export default function DashboardPage({ sellerId }: { sellerId: string }) {
+export default function DashboardPage() {
+  const { seller } = useAuth();
+  const sellerId = seller!.id; // ProtectedRoute guarantees an authenticated seller before this renders
   const [totals, setTotals] = useState<SellerTotals | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [filter, setFilter] = useState('All');
