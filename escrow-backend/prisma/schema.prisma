@@ -44,6 +44,7 @@ enum DisputeResolution {
 enum NotificationChannel {
   TELEGRAM
   EMAIL
+  IN_APP
 }
 
 enum NotificationType {
@@ -52,6 +53,9 @@ enum NotificationType {
   DEADLINE_REMINDER
   PAYMENT_CONFIRMED
   SHIPPED_REMINDER
+  DISBURSEMENT_MISSING
+  FUNDS_RELEASED
+  DEAL_PAID
 }
 
 model Seller {
@@ -65,6 +69,7 @@ model Seller {
   monnifySettlementBankCode String?
   verifiedBadge             Boolean  @default(false)
   emailVerifiedAt           DateTime?
+  salesChannels             String[] @default([])
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -190,6 +195,7 @@ model NotificationLog {
   type      NotificationType
   channel   NotificationChannel
   payload   Json?
+  read      Boolean              @default(false)
   sentAt    DateTime             @default(now())
 
   @@map("notification_log")

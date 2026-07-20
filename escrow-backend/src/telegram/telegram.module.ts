@@ -8,7 +8,14 @@ import { StorageModule } from '../storage/storage.module';
 import { MonnifyModule } from '../monnify/monnify.module';
 
 @Module({
-  imports: [SellersModule, forwardRef(() => DealsModule), AiModule, EmailModule, StorageModule, MonnifyModule],
+  imports: [
+    forwardRef(() => SellersModule),
+    forwardRef(() => DealsModule),
+    AiModule,
+    EmailModule,
+    StorageModule,
+    MonnifyModule,
+  ],
   providers: [TelegramService],
   exports: [TelegramService],
 })

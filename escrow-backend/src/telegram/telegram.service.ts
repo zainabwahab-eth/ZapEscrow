@@ -77,6 +77,7 @@ export class TelegramService implements OnModuleInit {
 
   constructor(
     private readonly config: ConfigService,
+    @Inject(forwardRef(() => SellersService))
     private readonly sellersService: SellersService,
     @Inject(forwardRef(() => DealsService))
     private readonly dealsService: DealsService,

@@ -9,6 +9,7 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { MonnifyService } from "../monnify/monnify.service";
 import { TelegramService } from "../telegram/telegram.service";
+import { NotificationsService } from "../notifications/notifications.service";
 import { CreateDealDto } from "./dto/create-deal.dto";
 import { DealEventActor, DealStatus, Prisma } from "../generated/prisma/client";
 
@@ -26,6 +27,7 @@ export class DealsService {
     private readonly monnify: MonnifyService,
     @Inject(forwardRef(() => TelegramService))
     private readonly telegramService: TelegramService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /** Step after the seller confirms the review screen — creates the deal + Monnify checkout. */
@@ -251,10 +253,41 @@ export class DealsService {
     });
     if (!deal) throw new NotFoundException("Deal not found");
 
+    if (!deal.seller.monnifySettlementAccount || !deal.seller.monnifySettlementBankCode) {
+      // Can't disburse yet — record it as pending and notify the seller
+      // instead of attempting a broken Monnify call with empty fields.
+      await this.prisma.disbursement.create({
+        data: {
+          dealId,
+          monnifyReference: `pending-${dealId}`,
+          amount: deal.amount,
+          status: "PENDING",
+        },
+      });
+      await this.notificationsService.create({
+        sellerId: deal.sellerId,
+        type: "DISBURSEMENT_MISSING",
+        channel: "IN_APP",
+        payload: { dealId, amount: deal.amount.toString() },
+      });
+      if (deal.seller.telegramId) {
+        await this.telegramService.sendMessage(
+          deal.seller.telegramId,
+          `💸 ₦${Number(deal.amount).toLocaleString()} is ready to release, but you haven't added a disbursement account yet. Reply /bank to add one — I'll release it as soon as it's set up.`,
+        );
+      }
+      return this.transition(
+        dealId,
+        DealStatus.RELEASED,
+        DealEventActor.SYSTEM,
+        "Release blocked — no settlement account on file",
+      );
+    }
+
     const transfer = await this.monnify.releaseSingleTransfer({
       amount: Number(deal.amount),
-      destinationAccountNumber: deal.seller.monnifySettlementAccount ?? "",
-      destinationBankCode: deal.seller.monnifySettlementBankCode ?? "",
+      destinationAccountNumber: deal.seller.monnifySettlementAccount,
+      destinationBankCode: deal.seller.monnifySettlementBankCode,
       destinationAccountName: deal.seller.businessName,
       dealId: deal.id,
     });
@@ -269,12 +302,33 @@ export class DealsService {
       },
     });
 
+    await this.notificationsService.create({
+      sellerId: deal.sellerId,
+      type: "FUNDS_RELEASED",
+      channel: "IN_APP",
+      payload: { dealId, amount: deal.amount.toString() },
+    });
+
     return this.transition(
       dealId,
       DealStatus.RELEASED,
       DealEventActor.SYSTEM,
       "Funds disbursed to seller",
     );
+  }
+
+  /** Retries any releases that were blocked on a missing settlement account, e.g. right after the seller adds one. */
+  async retryPendingDisbursementsForSeller(sellerId: string) {
+    const pending = await this.prisma.disbursement.findMany({
+      where: { status: "PENDING", deal: { sellerId } },
+      include: { deal: true },
+    });
+    for (const d of pending) {
+      if (d.monnifyReference.startsWith("pending-")) {
+        await this.prisma.disbursement.delete({ where: { id: d.id } });
+        await this.releaseFunds(d.dealId);
+      }
+    }
   }
 
   private async transition(

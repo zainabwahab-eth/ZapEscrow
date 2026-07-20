@@ -11,6 +11,7 @@ import { SchedulerModule } from './scheduler/scheduler.module';
 import { AiModule } from './ai/ai.module';
 import { EmailModule } from './email/email.module';
 import { StorageModule } from './storage/storage.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { StorageModule } from './storage/storage.module';
     AiModule,
     EmailModule,
     StorageModule,
+    AuthModule,
   ],
 })
 export class AppModule {}
