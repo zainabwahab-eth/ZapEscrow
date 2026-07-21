@@ -35,6 +35,26 @@ export class EmailService {
     }
   }
 
+  async sendPasswordReset(to: string, resetUrl: string) {
+    if (!this.resend) {
+      throw new Error('Email sending is not configured (RESEND_API_KEY missing)');
+    }
+
+    const { error } = await this.resend.emails.send({
+      from: this.fromEmail,
+      to,
+      subject: 'Reset your password',
+      html:
+        `<p>We received a request to reset your password.</p>` +
+        `<p><a href="${resetUrl}">${resetUrl}</a></p>` +
+        `<p>This link expires in 30 minutes. If you didn't request this, you can safely ignore this email.</p>`,
+    });
+    if (error) {
+      this.logger.error(`Failed to send password reset email to ${to}: ${error.message}`);
+      throw new Error(error.message);
+    }
+  }
+
   /**
    * Best-effort notification emails below — unlike sendOtp, failures here
    * are logged and swallowed rather than thrown, since they're side

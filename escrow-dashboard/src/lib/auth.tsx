@@ -8,15 +8,19 @@ interface AuthContextValue {
   token: string | null;
   seller: Seller | null;
   isAuthenticated: boolean;
-  login: (token: string, seller: Seller) => void;
+  login: (token: string, seller: Seller, remember?: boolean) => void;
   logout: () => void;
   setSeller: (seller: Seller) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+function readStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY);
+}
+
 function readStoredSeller(): Seller | null {
-  const raw = localStorage.getItem(SELLER_KEY);
+  const raw = localStorage.getItem(SELLER_KEY) ?? sessionStorage.getItem(SELLER_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as Seller;
@@ -26,12 +30,18 @@ function readStoredSeller(): Seller | null {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
+  const [token, setToken] = useState<string | null>(readStoredToken);
   const [seller, setSellerState] = useState<Seller | null>(readStoredSeller);
 
-  const login = useCallback((newToken: string, newSeller: Seller) => {
-    localStorage.setItem(TOKEN_KEY, newToken);
-    localStorage.setItem(SELLER_KEY, JSON.stringify(newSeller));
+  // remember=true persists across browser restarts (localStorage); false
+  // clears on tab/browser close (sessionStorage) — the "keep me logged in" checkbox.
+  const login = useCallback((newToken: string, newSeller: Seller, remember = true) => {
+    const store = remember ? localStorage : sessionStorage;
+    const other = remember ? sessionStorage : localStorage;
+    other.removeItem(TOKEN_KEY);
+    other.removeItem(SELLER_KEY);
+    store.setItem(TOKEN_KEY, newToken);
+    store.setItem(SELLER_KEY, JSON.stringify(newSeller));
     setToken(newToken);
     setSellerState(newSeller);
   }, []);
@@ -39,12 +49,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(SELLER_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(SELLER_KEY);
     setToken(null);
     setSellerState(null);
   }, []);
 
   const setSeller = useCallback((newSeller: Seller) => {
-    localStorage.setItem(SELLER_KEY, JSON.stringify(newSeller));
+    const store = localStorage.getItem(TOKEN_KEY) ? localStorage : sessionStorage;
+    store.setItem(SELLER_KEY, JSON.stringify(newSeller));
     setSellerState(newSeller);
   }, []);
 
@@ -65,7 +78,7 @@ export function useAuth() {
 
 /** Standalone accessor for use outside React (e.g. the axios interceptor). */
 export function getAuthToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY);
 }
 
 export function getAuthHeader(): Record<string, string> {

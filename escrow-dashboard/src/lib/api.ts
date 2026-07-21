@@ -154,8 +154,16 @@ export const authApi = {
       .post<{ token: string; seller: Seller }>('/auth/signup/complete', { email, password, verifiedToken })
       .then((r) => r.data),
 
-  login: (email: string, password: string) =>
-    api.post<{ token: string; seller: Seller }>('/auth/login', { email, password }).then((r) => r.data),
+  login: (email: string, password: string, rememberMe: boolean) =>
+    api
+      .post<{ token: string; seller: Seller }>('/auth/login', { email, password, rememberMe })
+      .then((r) => r.data),
+
+  forgotPassword: (email: string) =>
+    api.post<{ message: string }>('/auth/forgot-password', { email }).then((r) => r.data),
+
+  resetPassword: (token: string, password: string) =>
+    api.post<{ message: string }>('/auth/reset-password', { token, password }).then((r) => r.data),
 };
 
 export const sellersApi = {

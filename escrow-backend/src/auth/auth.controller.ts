@@ -21,7 +21,17 @@ export class AuthController {
   }
 
   @Post('login')
-  login(@Body() body: { email: string; password: string }) {
-    return this.authService.login(body.email, body.password);
+  login(@Body() body: { email: string; password: string; rememberMe?: boolean }) {
+    return this.authService.login(body.email, body.password, body.rememberMe ?? false);
+  }
+
+  @Post('forgot-password')
+  forgotPassword(@Body() body: { email: string }) {
+    return this.authService.initiateForgotPassword(body.email);
+  }
+
+  @Post('reset-password')
+  resetPassword(@Body() body: { token: string; password: string }) {
+    return this.authService.resetPassword(body.token, body.password);
   }
 }
