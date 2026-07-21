@@ -107,8 +107,8 @@ export default function NewDealPage() {
   }
 
   function handleCopyLink() {
-    if (!createdDeal?.checkoutUrl) return;
-    navigator.clipboard.writeText(createdDeal.checkoutUrl).then(() => {
+    if (!createdDeal) return;
+    navigator.clipboard.writeText(`${window.location.origin}/pay/${createdDeal.id}`).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -340,7 +340,9 @@ export default function NewDealPage() {
 
           <div className="relative border border-escrow-ink/15 bg-white p-4 flex items-center gap-3">
             <CornerMarks />
-            <p className="flex-1 text-sm text-escrow-ink/70 truncate">{createdDeal.checkoutUrl}</p>
+            <p className="flex-1 text-sm text-escrow-ink/70 truncate">
+              {window.location.origin}/pay/{createdDeal.id}
+            </p>
             <button
               onClick={handleCopyLink}
               className="shrink-0 inline-flex items-center gap-1.5 text-sm text-escrow-teal font-medium hover:underline"
