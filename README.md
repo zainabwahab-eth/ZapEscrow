@@ -122,6 +122,13 @@ Every transition is logged in a `deal_events` audit table — who triggered it (
 
 ---
 
+## Scheduler
+
+A background job runs continuously alongside the API:
+
+- **Daily digest (7am)** — sends each active seller a summary of their deals currently in escrow via Telegram, so they never have to check the dashboard just to know what's pending.
+- **Hourly deadline check** — scans shipped deals for ones past their auto-release deadline (buyer never responded) and releases funds to the seller automatically, mirroring the Alipay/Taobao pattern of protecting sellers from silent buyers.
+
 ## Project structure
 
 ```
