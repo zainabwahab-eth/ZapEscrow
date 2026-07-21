@@ -30,28 +30,13 @@ type ConversationState = 'AWAITING_DEAL' | 'AWAITING_BUYER_PHONE' | 'AWAITING_OT
 const DRAFT_TTL_SECONDS = 60 * 30; // 30 min — abandoned drafts just expire
 const OTP_TTL_SECONDS = 600; // 10 min
 const BANK_CONFIRM_TTL_SECONDS = 600; // 10 min — window to tap Confirm/Cancel after /bank
+const BANKS_CACHE_TTL_SECONDS = 6 * 60 * 60; // 6 hours — the bank list rarely changes
+const BANKS_CACHE_KEY = 'monnify:banks';
 const BOT_STARTUP_TIMEOUT_MS = 15_000; // cap on Telegram API calls during boot — a hang shouldn't block the rest of the app
 
 const CHITCHAT_WORDS = new Set(['hi', 'hello', 'hey', 'sup', 'test', 'ok', 'okay', 'thanks', 'thank you']);
 
 const EMAIL_PATTERN = /[^\s]+@[^\s]+\.[^\s]+/;
-
-// Common Nigerian banks/fintechs a seller is likely to type, mapped to their
-// NIBSS/Monnify bank codes. Keys are normalized (lowercase, no spaces).
-const BANK_NAME_TO_CODE: Record<string, string> = {
-  gtbank: '058',
-  gtb: '058',
-  access: '044',
-  accessbank: '044',
-  zenith: '057',
-  zenithbank: '057',
-  uba: '033',
-  firstbank: '011',
-  first: '011',
-  kuda: '50211',
-  opay: '999992',
-  moniepoint: '50515',
-};
 
 /**
  * In-progress deals live in Redis, keyed by telegramId, and are never
@@ -230,9 +215,20 @@ export class TelegramService implements OnModuleInit {
     return String(Math.floor(100000 + Math.random() * 900000));
   }
 
-  private resolveBankCode(bankName: string): string | undefined {
-    const key = bankName.trim().toLowerCase().replace(/\s+/g, '');
-    return BANK_NAME_TO_CODE[key];
+  /** Monnify's full bank list, cached in Redis since it rarely changes and /bank shouldn't hit the API on every call. */
+  private async getBanksCached(): Promise<{ name: string; code: string }[]> {
+    const cached = await this.redis.get(BANKS_CACHE_KEY);
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch {
+        // fall through and refetch on corrupt cache
+      }
+    }
+
+    const banks = await this.monnifyService.getBanks();
+    await this.redis.set(BANKS_CACHE_KEY, JSON.stringify(banks), 'EX', BANKS_CACHE_TTL_SECONDS);
+    return banks;
   }
 
   /** Creates the deal from a completed draft and clears its Redis state. Caller must ensure buyerPhone is set. */
@@ -513,20 +509,30 @@ export class TelegramService implements OnModuleInit {
 
       const args = ctx.message.text.split(' ').slice(1);
       if (args.length < 2) {
-        await ctx.reply(
-          'Send your account number and bank name together, e.g.\n/bank 0123456789 GTBank\n\n' +
-            `Supported banks: ${Array.from(new Set(Object.keys(BANK_NAME_TO_CODE))).join(', ')}`,
-        );
+        await ctx.reply('Send your account number and bank name together, e.g.\n/bank 0123456789 GTBank');
         return;
       }
 
       const [accountNumber, ...bankNameParts] = args;
-      const bankName = bankNameParts.join(' ');
-      const bankCode = this.resolveBankCode(bankName);
-      if (!bankCode) {
-        await ctx.reply(`I don't recognize "${bankName}" as a supported bank — try GTBank, Access, Zenith, UBA, First Bank, Kuda, Opay, or Moniepoint.`);
+      const bankNameInput = bankNameParts.join(' ');
+
+      let banks: { name: string; code: string }[];
+      try {
+        banks = await this.getBanksCached();
+      } catch (err) {
+        this.logger.error('Failed to fetch bank list from Monnify:', err);
+        await ctx.reply("Couldn't fetch the bank list right now — please try again shortly.");
         return;
       }
+
+      const match = banks.find((b) => b.name.toLowerCase().includes(bankNameInput.toLowerCase()));
+      if (!match) {
+        await ctx.reply(
+          `I couldn't find a bank matching "${bankNameInput}" — try the exact bank name, e.g. "Fidelity Bank" or "GTBank".`,
+        );
+        return;
+      }
+      const bankCode = match.code;
 
       try {
         const result = await this.monnifyService.nameEnquiry(accountNumber, bankCode);
