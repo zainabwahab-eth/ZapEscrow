@@ -177,6 +177,7 @@ export class MonnifyService {
             amount: params.amount,
             reference,
             narration: `Escrow release for deal ${params.dealId}`,
+            sourceAccountNumber: this.config.get<string>("MONNIFY_WALLET_ACCOUNT_NUMBER"),
             destinationBankCode: params.destinationBankCode,
             destinationAccountNumber: params.destinationAccountNumber,
             destinationAccountName: params.destinationAccountName,
