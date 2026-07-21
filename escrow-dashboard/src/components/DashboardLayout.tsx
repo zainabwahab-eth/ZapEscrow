@@ -1,10 +1,14 @@
+import { useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, FileText, Settings as SettingsIcon } from 'lucide-react';
+import { LayoutDashboard, Package, FileText, Settings as SettingsIcon, Scale } from 'lucide-react';
 import NotificationBell from './NotificationBell';
+import { sellersApi } from '../lib/api';
+import { useAuth } from '../lib/auth';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/deals', label: 'Deals', icon: Package },
+  { to: '/disputes', label: 'Disputes', icon: Scale },
   { to: '/invoicing', label: 'Invoicing', icon: FileText, badge: 'Soon', muted: true },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
@@ -12,19 +16,30 @@ const NAV_ITEMS = [
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/deals': 'Deals',
+  '/deals/new': 'New deal',
+  '/disputes': 'Disputes',
   '/invoicing': 'Invoicing',
   '/settings': 'Settings',
 };
 
 export default function DashboardLayout() {
   const location = useLocation();
+  const { setSeller } = useAuth();
   const title = PAGE_TITLES[location.pathname] ?? 'Dashboard';
+
+  // The cached seller (localStorage, set at login) can go stale — e.g. a
+  // settlement account added via the Telegram bot's /bank command wouldn't
+  // show up here otherwise. Refresh from the server on every dashboard visit.
+  useEffect(() => {
+    sellersApi.me().then(setSeller).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="min-h-screen bg-escrow-cream text-escrow-ink font-sans flex">
       <aside className="w-60 shrink-0 bg-white/60 border-r border-escrow-ink/10 flex flex-col">
         <div className="px-6 py-6">
-          <span className="font-fraunces text-xl tracking-tight">Zap</span>
+          <img src="/logo-wordmark.svg" alt="Zap" className="h-8 w-auto" />
         </div>
         <nav className="flex-1 px-3 space-y-1">
           {NAV_ITEMS.map((item) => (

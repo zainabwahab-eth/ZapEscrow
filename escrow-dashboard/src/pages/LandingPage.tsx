@@ -1,36 +1,36 @@
-import { Link } from 'react-router-dom';
-import { useState } from 'react';
-import CornerMarks from '../components/CornerMarks';
+import { Link } from "react-router-dom";
+import { useState } from "react";
+import CornerMarks from "../components/CornerMarks";
 
-const TELEGRAM_BOT_URL = 'https://t.me/ZapEscrowBot';
+const TELEGRAM_BOT_URL = "https://t.me/ZapEscrowBot";
 
 const STEPS = [
   {
-    number: '01',
-    title: 'Buyer pays into escrow',
+    number: "01",
+    title: "Buyer pays into escrow",
     body: 'Not straight to your account — into escrow instead. That one detail is often the difference between "let me think about it" and "sent!"',
   },
   {
-    number: '02',
-    title: 'Held safely',
+    number: "02",
+    title: "Held safely",
     body: "Funds sit locked, untouched by either of you. No arguing over screenshots or 'proof of payment.'",
   },
   {
-    number: '03',
-    title: 'Buyer confirms',
-    body: 'Once they confirm delivery — or the window closes without a word — the deal closes automatically.',
+    number: "03",
+    title: "Buyer confirms",
+    body: "Once they confirm delivery — or the window closes without a word — the deal closes automatically.",
   },
   {
-    number: '04',
-    title: 'You get paid',
-    body: 'Funds land in your settlement account on their own. No chasing, no waiting on a transfer.',
+    number: "04",
+    title: "You get paid",
+    body: "Funds land in your settlement account on their own. No chasing, no waiting on a transfer.",
   },
 ];
 
 const FAQS = [
   {
-    q: 'Do my buyers need to sign up for anything?',
-    a: 'No. Buyers just click the payment link you send — no account, no app, no login. They pay, and later confirm receipt, entirely without creating anything.',
+    q: "Do my buyers need to sign up for anything?",
+    a: "No. Buyers just click the payment link you send — no account, no app, no login. They pay, and later confirm receipt, entirely without creating anything.",
   },
   {
     q: "What if a buyer says they didn't receive the item?",
@@ -41,14 +41,19 @@ const FAQS = [
     a: "Funds release to you automatically after the response window closes — a buyer can't hold your money hostage by ignoring a message.",
   },
   {
-    q: 'Can I use this without the dashboard, just on Telegram?',
-    a: 'Yes — the Telegram bot handles deal creation, shipment updates, and payouts end to end. The dashboard is there if you want a broader view.',
+    q: "Can I use this without the dashboard, just on Telegram?",
+    a: "Yes — the Telegram bot handles deal creation, shipment updates, and payouts end to end. The dashboard is there if you want a broader view.",
   },
 ];
 
 function ProblemIllustration() {
   return (
-    <svg viewBox="0 0 420 200" fill="none" className="w-full h-auto text-escrow-ink" aria-hidden="true">
+    <svg
+      viewBox="0 0 420 200"
+      fill="none"
+      className="w-full h-auto text-escrow-ink"
+      aria-hidden="true"
+    >
       <rect x="24" y="30" width="72" height="140" rx="12" stroke="currentColor" strokeWidth="1.5" />
       <line x1="48" y1="152" x2="72" y2="152" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <circle cx="60" cy="70" r="16" stroke="currentColor" strokeWidth="1.5" />
@@ -62,6 +67,22 @@ function ProblemIllustration() {
   );
 }
 
+function EscrowCardIllustration() {
+  // Small decorative ring-and-lock graphic sitting behind the stat card content,
+  // giving the "Live escrow" card visual weight beyond plain text.
+  return (
+    <svg
+      viewBox="0 0 200 200"
+      className="absolute -right-6 -bottom-6 w-40 h-40 text-escrow-teal/10 pointer-events-none"
+      aria-hidden="true"
+    >
+      <circle cx="100" cy="100" r="80" stroke="currentColor" strokeWidth="1.5" fill="none" />
+      <circle cx="100" cy="100" r="56" stroke="currentColor" strokeWidth="1.5" fill="none" />
+      <circle cx="100" cy="100" r="4" fill="currentColor" />
+    </svg>
+  );
+}
+
 function FaqItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -71,101 +92,182 @@ function FaqItem({ q, a }: { q: string; a: string }) {
         className="w-full flex items-center justify-between text-left gap-4"
       >
         <span className="font-medium">{q}</span>
-        <span className="text-escrow-ink/40 text-xl leading-none flex-shrink-0">{open ? '−' : '+'}</span>
+        <span className="text-escrow-ink/40 text-xl leading-none flex-shrink-0">
+          {open ? "−" : "+"}
+        </span>
       </button>
-      {open && <p className="mt-3 text-sm text-escrow-ink/65 leading-relaxed max-w-2xl">{a}</p>}
+      {open && (
+        <p className="mt-3 text-sm text-escrow-ink/65 leading-relaxed max-w-2xl">
+          {a}
+        </p>
+      )}
     </div>
   );
 }
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-escrow-cream text-escrow-ink font-sans">
+    <div className="min-h-screen bg-escrow-cream text-escrow-ink font-sans overflow-x-clip">
       <header className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between">
-        <span className="font-fraunces text-xl tracking-tight">Zap</span>
+        <div className="flex items-center">
+          <div className="px-6 py-6">
+            <img src="/logo-wordmark.svg" alt="Zap" className="h-8 w-auto" />
+          </div>
+          <span className="font-fraunces text-xl tracking-tight">
+            ZapEscrow
+          </span>
+        </div>
         <div className="flex items-center gap-6">
-          <a href={TELEGRAM_BOT_URL} target="_blank" rel="noopener noreferrer" className="text-sm font-mono text-escrow-ink/60 hover:text-escrow-ink transition hidden sm:inline">
+          <a
+            href={TELEGRAM_BOT_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-mono text-escrow-ink/60 hover:text-escrow-ink transition hidden sm:inline"
+          >
             @ZapEscrowBot
           </a>
-          <Link to="/login" className="text-sm text-escrow-ink/70 hover:text-escrow-ink transition">
+          <Link
+            to="/login"
+            className="text-sm text-escrow-ink/70 hover:text-escrow-ink transition"
+          >
             Log in
           </Link>
         </div>
       </header>
 
-      {/* Hero — asymmetric, left-aligned */}
+      {/* Hero — asymmetric, left-aligned, staggered entrance animation */}
       <section className="max-w-6xl mx-auto px-6 pt-16 pb-24 md:pt-24 md:pb-32 grid md:grid-cols-[1.3fr_1fr] gap-12 items-end">
         <div>
-          <p className="font-mono text-xs tracking-widest text-escrow-coral uppercase mb-5">Escrow for DM sellers</p>
-          <h1 className="font-fraunces text-4xl sm:text-5xl md:text-[3.4rem] leading-[1.08]">
-            Never lose a sale to<br />"is this a scam?" again.
-          </h1>
-          <p className="mt-6 text-lg text-escrow-ink/70 max-w-md">
-            Zap lets your buyers pay into escrow instead of straight to your account — so hesitant customers say
-            yes, and you still get paid the moment they confirm delivery.
+          <p className="font-mono text-xs tracking-widest text-escrow-coral uppercase mb-5 animate-fade-in-up [animation-delay:0ms]">
+            Escrow for DM sellers
           </p>
-          <div className="mt-8 flex flex-col sm:flex-row gap-3">
-            <Link to="/signup" className="px-7 py-3 rounded-full bg-escrow-teal text-white font-medium hover:opacity-90 transition text-center">
-              Get Started
+          <h1 className="font-fraunces text-4xl sm:text-5xl md:text-[3.4rem] leading-[1.08] animate-fade-in-up [animation-delay:100ms]">
+            Never lose a sale to
+            <br />
+            "is this a scam?" again.
+          </h1>
+          <p className="mt-6 text-lg text-escrow-ink/70 max-w-md animate-fade-in-up [animation-delay:220ms]">
+            Zap lets your buyers pay into escrow instead of straight to your
+            account — so hesitant customers say yes, and you still get paid the
+            moment they confirm delivery.
+          </p>
+          <div className="mt-8 flex flex-col sm:flex-row gap-3 animate-fade-in-up [animation-delay:340ms]">
+            <Link
+              to="/signup"
+              className="group relative overflow-hidden px-7 py-3 rounded-full bg-escrow-teal text-white font-medium text-center transition-transform hover:scale-[1.03] active:scale-[0.98]"
+            >
+              <span className="relative z-10 inline-flex items-center gap-2">
+                Get Started
+                <span className="transition-transform group-hover:translate-x-1">→</span>
+              </span>
+              <span className="absolute inset-0 bg-escrow-ink/10 scale-x-0 group-hover:scale-x-100 origin-left transition-transform duration-300" />
             </Link>
-            <a href={TELEGRAM_BOT_URL} target="_blank" rel="noopener noreferrer" className="px-7 py-3 rounded-full border border-escrow-ink/20 font-medium hover:border-escrow-ink/40 transition text-center">
+            <a
+              href={TELEGRAM_BOT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group px-7 py-3 rounded-full border border-escrow-ink/20 font-medium text-center transition-all hover:border-escrow-ink hover:bg-escrow-ink hover:text-escrow-cream"
+            >
               Use Telegram Bot
             </a>
           </div>
         </div>
 
-        <div className="relative border border-escrow-ink/15 p-6 bg-white/50">
+        <div className="card-sheen relative border border-escrow-ink/15 p-6 bg-white/50 overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-escrow-teal/40 animate-fade-in-up [animation-delay:200ms]">
           <CornerMarks />
-          <p className="font-mono text-xs tracking-widest text-escrow-ink/40 uppercase">Live escrow</p>
-          <p className="font-fraunces text-4xl mt-3">₦8,000</p>
-          <p className="text-sm text-escrow-ink/60 mt-1">Held for 3 days · releases automatically in 4</p>
-          <div className="mt-4 h-1.5 rounded-full bg-escrow-ink/10 overflow-hidden">
-            <div className="h-full w-[43%] bg-escrow-teal rounded-full" />
+          <EscrowCardIllustration />
+          <div className="relative flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-escrow-teal animate-pulse-dot" />
+            <p className="font-mono text-xs tracking-widest text-escrow-ink/40 uppercase">
+              Live escrow
+            </p>
+          </div>
+          <p className="relative font-fraunces text-4xl mt-3">₦8,000</p>
+          <p className="relative text-sm text-escrow-ink/60 mt-1">
+            Held for 3 days · releases automatically in 4
+          </p>
+          <div className="relative mt-4 h-1.5 rounded-full bg-escrow-ink/10 overflow-hidden">
+            <div className="h-full w-[43%] bg-escrow-teal rounded-full transition-all duration-700" />
           </div>
         </div>
       </section>
 
+      {/* Powered by — scrolling marquee */}
+      <section className="border-y border-escrow-ink/10 bg-white/40 py-5 overflow-hidden">
+        <div className="flex animate-marquee whitespace-nowrap">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <span key={i} className="flex items-center gap-3 mx-8 shrink-0">
+              <span className="font-mono text-xs tracking-widest text-escrow-ink/45 uppercase">
+                Payments powered by
+              </span>
+              <span className="font-fraunces text-lg text-escrow-ink/80">
+                Monnify
+              </span>
+            </span>
+          ))}
+        </div>
+      </section>
+
       {/* Problem */}
-      <section className="max-w-6xl mx-auto px-6 py-16 md:py-24 grid md:grid-cols-2 gap-12 items-center border-t border-escrow-ink/10">
+      <section className="scroll-reveal max-w-6xl mx-auto px-6 py-16 md:py-24 grid md:grid-cols-2 gap-12 items-center border-t border-escrow-ink/10">
         <div>
-          <p className="font-mono text-xs tracking-widest text-escrow-coral uppercase mb-3">The problem</p>
+          <p className="font-mono text-xs tracking-widest text-escrow-coral uppercase mb-3">
+            The problem
+          </p>
           <h2 className="font-fraunces text-3xl md:text-4xl leading-tight">
             Right now, hesitant buyers cost you sales.
           </h2>
           <p className="mt-5 text-escrow-ink/70 leading-relaxed">
-            Every day, buyers ghost mid-checkout because they don't know if you'll actually deliver. The ones who
-            do pay make you sweat until the money clears — and if a dispute comes up, you're arguing it out alone.
+            Every day, buyers ghost mid-checkout because they don't know if
+            you'll actually deliver. The ones who do pay make you sweat until
+            the money clears — and if a dispute comes up, you're arguing it out
+            alone.
           </p>
         </div>
         <ProblemIllustration />
       </section>
 
       {/* Big stat */}
-      <section className="bg-escrow-ink text-escrow-cream">
+      <section className="scroll-reveal bg-escrow-ink text-escrow-cream">
         <div className="max-w-6xl mx-auto px-6 py-16 md:py-20 grid md:grid-cols-[1fr_auto] gap-8 items-center">
           <div>
-            <p className="font-mono text-xs tracking-widest text-escrow-coral uppercase mb-3">Why it works</p>
+            <p className="font-mono text-xs tracking-widest text-escrow-coral uppercase mb-3">
+              Why it works
+            </p>
             <h2 className="font-fraunces text-3xl md:text-4xl leading-tight">
               Buyers convert more when the risk isn't on them anymore.
             </h2>
           </div>
-          <p className="font-fraunces text-6xl md:text-7xl whitespace-nowrap">0 → 1</p>
+          <p className="font-fraunces text-6xl md:text-7xl whitespace-nowrap">
+            0 → 1
+          </p>
         </div>
       </section>
 
-      {/* How it works */}
+      {/* How it works — hover lift + shadow on cards */}
       <section className="bg-white/60 border-b border-escrow-ink/10">
         <div className="max-w-6xl mx-auto px-6 py-16 md:py-24">
-          <p className="font-mono text-xs tracking-widest text-escrow-teal uppercase mb-3">How Zap works</p>
-          <h2 className="font-fraunces text-3xl md:text-4xl">Four steps. No surprises.</h2>
+          <p className="font-mono text-xs tracking-widest text-escrow-teal uppercase mb-3">
+            How Zap works
+          </p>
+          <h2 className="font-fraunces text-3xl md:text-4xl">
+            Four steps. No surprises.
+          </h2>
 
           <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-4 gap-10">
             {STEPS.map((step) => (
-              <div key={step.number} className="relative border border-escrow-ink/10 p-5 bg-escrow-cream">
+              <div
+                key={step.number}
+                className="card-sheen scroll-reveal relative border border-escrow-ink/10 p-5 bg-escrow-cream transition-all duration-300 hover:-translate-y-2 hover:shadow-lg hover:border-escrow-teal/40"
+              >
                 <CornerMarks />
-                <span className="font-fraunces text-3xl text-escrow-teal">{step.number}</span>
+                <span className="font-fraunces text-3xl text-escrow-teal">
+                  {step.number}
+                </span>
                 <h3 className="font-medium text-lg mt-3">{step.title}</h3>
-                <p className="mt-2 text-sm text-escrow-ink/65 leading-relaxed">{step.body}</p>
+                <p className="mt-2 text-sm text-escrow-ink/65 leading-relaxed">
+                  {step.body}
+                </p>
               </div>
             ))}
           </div>
@@ -174,20 +276,27 @@ export default function LandingPage() {
 
       {/* Testimonial */}
       <section className="max-w-6xl mx-auto px-6 py-16 md:py-24">
-        <div className="relative border border-escrow-ink/15 p-8 md:p-12 max-w-2xl mx-auto text-center bg-white/50">
+        <div className="card-sheen scroll-reveal relative border border-escrow-ink/15 p-8 md:p-12 max-w-2xl mx-auto text-center bg-white/50 transition-all duration-300 hover:shadow-lg">
           <CornerMarks />
           <p className="font-fraunces text-2xl md:text-3xl leading-snug">
-            "I used to lose at least one sale a week to someone who just wanted to 'think about it.' Now they pay
-            immediately because they know their money's protected."
+            "I used to lose at least one sale a week to someone who just wanted
+            to 'think about it.' Now they pay immediately because they know
+            their money's protected."
           </p>
-          <p className="mt-6 text-sm text-escrow-ink/60 font-mono">Early ZapEscrow seller</p>
+          <p className="mt-6 text-sm text-escrow-ink/60 font-mono">
+            Early ZapEscrow seller
+          </p>
         </div>
       </section>
 
       {/* FAQ */}
-      <section className="max-w-4xl mx-auto px-6 py-16 md:py-24 border-t border-escrow-ink/10">
-        <p className="font-mono text-xs tracking-widest text-escrow-coral uppercase mb-3">Questions</p>
-        <h2 className="font-fraunces text-3xl md:text-4xl mb-8">Have any questions? We've got answers.</h2>
+      <section className="scroll-reveal max-w-4xl mx-auto px-6 py-16 md:py-24 border-t border-escrow-ink/10">
+        <p className="font-mono text-xs tracking-widest text-escrow-coral uppercase mb-3">
+          Questions
+        </p>
+        <h2 className="font-fraunces text-3xl md:text-4xl mb-8">
+          Have any questions? We've got answers.
+        </h2>
         <div>
           {FAQS.map((f) => (
             <FaqItem key={f.q} q={f.q} a={f.a} />
@@ -196,15 +305,21 @@ export default function LandingPage() {
       </section>
 
       {/* Final CTA */}
-      <section className="bg-escrow-teal text-escrow-cream">
+      <section className="scroll-reveal bg-escrow-teal text-escrow-cream">
         <div className="max-w-6xl mx-auto px-6 py-16 md:py-20 text-center">
-          <h2 className="font-fraunces text-3xl md:text-4xl">Stop losing sales to trust issues.</h2>
+          <h2 className="font-fraunces text-3xl md:text-4xl">
+            Stop losing sales to trust issues.
+          </h2>
           <p className="mt-4 text-escrow-cream/80 max-w-lg mx-auto">
-            Your buyers get the same protection big retailers offer — you get paid faster because they finally
-            trust you enough to hit "pay now."
+            Your buyers get the same protection big retailers offer — you get
+            paid faster because they finally trust you enough to hit "pay now."
           </p>
-          <Link to="/signup" className="inline-block mt-8 px-7 py-3 rounded-full bg-escrow-cream text-escrow-teal font-medium hover:opacity-90 transition">
+          <Link
+            to="/signup"
+            className="group inline-flex items-center gap-2 mt-8 px-7 py-3 rounded-full bg-escrow-cream text-escrow-teal font-medium transition-transform hover:scale-[1.03] active:scale-[0.98]"
+          >
             Get Started
+            <span className="transition-transform group-hover:translate-x-1">→</span>
           </Link>
         </div>
       </section>
@@ -216,7 +331,12 @@ export default function LandingPage() {
           <span className="ml-2">Escrow for DM sales.</span>
         </div>
         <div className="flex items-center gap-6">
-          <a href={TELEGRAM_BOT_URL} target="_blank" rel="noopener noreferrer" className="hover:text-escrow-ink transition">
+          <a
+            href={TELEGRAM_BOT_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-escrow-ink transition"
+          >
             Talk to the Telegram bot →
           </a>
           <span>© 2026 Zap</span>

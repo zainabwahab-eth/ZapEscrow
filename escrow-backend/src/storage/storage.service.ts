@@ -44,4 +44,23 @@ export class StorageService {
     const { data } = this.client.storage.from(this.bucket).getPublicUrl(path);
     return data.publicUrl;
   }
+
+  /** Uploads a browser-submitted file buffer (e.g. from the dashboard's deal item form) and returns its public URL. */
+  async uploadBuffer(buffer: Buffer, path: string, contentType: string): Promise<string> {
+    if (!this.client) {
+      throw new Error('Image storage is not configured (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY missing)');
+    }
+
+    const { error } = await this.client.storage.from(this.bucket).upload(path, buffer, {
+      contentType,
+      upsert: true,
+    });
+    if (error) {
+      this.logger.error(`Supabase upload failed for ${path}: ${error.message}`);
+      throw new Error(error.message);
+    }
+
+    const { data } = this.client.storage.from(this.bucket).getPublicUrl(path);
+    return data.publicUrl;
+  }
 }

@@ -567,6 +567,8 @@ export class DealsService {
       sellerName: deal.seller.businessName,
       sellerVerified: deal.seller.verifiedBadge,
       buyerName: deal.buyerName,
+      buyerPhone: deal.buyerPhone,
+      buyerEmail: deal.buyerEmail,
       amount: deal.amount,
       status: deal.status,
       checkoutUrl: deal.checkoutUrl,

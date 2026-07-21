@@ -39,15 +39,47 @@ export interface Deal {
     | 'REFUNDED'
     | 'EXPIRED';
   checkoutUrl?: string;
-  autoReleaseDeadline?: string;
+  paidAt?: string | null;
+  estimatedDeliveryDate?: string | null;
+  autoReleaseDeadline?: string | null;
   createdAt: string;
   items: DealItem[];
+}
+
+export interface Dispute {
+  id: string;
+  reason: string;
+  evidenceUrl?: string | null;
+  sellerResponse?: string | null;
+  resolution?: 'RELEASED' | 'REFUNDED' | null;
+  resolvedAt?: string | null;
+  createdAt: string;
+}
+
+export interface DisputedDeal extends Deal {
+  dispute: Dispute | null;
+  seller: { businessName: string };
 }
 
 export interface SellerTotals {
   totalInEscrow: string;
   totalReleased: string;
   totalRefunded: string;
+}
+
+export interface CreateDealItemInput {
+  name: string;
+  unitPrice: number;
+  quantity: number;
+  imageUrl?: string;
+}
+
+export interface CreateDealInput {
+  sellerId: string;
+  buyerName?: string;
+  buyerPhone: string;
+  buyerEmail?: string;
+  items: CreateDealItemInput[];
 }
 
 export const dealsApi = {
@@ -59,11 +91,15 @@ export const dealsApi = {
   getTotals: (sellerId: string) =>
     api.get<SellerTotals>(`/deals/seller/${sellerId}/totals`).then((r) => r.data),
 
+  create: (params: CreateDealInput) => api.post<Deal>('/deals', params).then((r) => r.data),
+
   markShipped: (dealId: string, estimatedDeliveryDate?: string) =>
     api.patch(`/deals/${dealId}/ship`, { estimatedDeliveryDate }).then((r) => r.data),
 
   resolveDispute: (dealId: string, resolution: 'RELEASED' | 'REFUNDED') =>
     api.patch(`/deals/${dealId}/resolve-dispute`, { resolution }).then((r) => r.data),
+
+  listDisputes: () => api.get<DisputedDeal[]>('/deals/disputes').then((r) => r.data),
 };
 
 export interface PublicDeal {
@@ -71,14 +107,24 @@ export interface PublicDeal {
   sellerName: string;
   sellerVerified: boolean;
   buyerName?: string;
+  buyerPhone?: string;
+  buyerEmail?: string;
   amount: string;
   status: string;
   checkoutUrl: string;
+  shippedAt?: string | null;
+  estimatedDeliveryDate?: string | null;
+  autoReleaseDeadline?: string | null;
   items: { name: string; imageUrl?: string; unitPrice: string; quantity: number }[];
 }
 
 export const publicDealApi = {
   get: (dealId: string) => api.get<PublicDeal>(`/deals/${dealId}/public`).then((r) => r.data),
+
+  confirm: (dealId: string) => api.post(`/deals/${dealId}/public/confirm`).then((r) => r.data),
+
+  dispute: (dealId: string, reason: string) =>
+    api.post(`/deals/${dealId}/public/dispute`, { reason }).then((r) => r.data),
 };
 
 export interface Seller {
@@ -127,6 +173,12 @@ export const sellersApi = {
       .then((r) => r.data),
 };
 
+export interface MonnifyBank {
+  name: string;
+  code: string;
+  logo?: string;
+}
+
 export const monnifyApi = {
   nameEnquiry: (accountNumber: string, bankCode: string) =>
     api
@@ -134,6 +186,16 @@ export const monnifyApi = {
         params: { account: accountNumber, bank: bankCode },
       })
       .then((r) => r.data),
+
+  getBanks: () => api.get<MonnifyBank[]>('/monnify/banks').then((r) => r.data),
+};
+
+export const storageApi = {
+  upload: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post<{ url: string }>('/storage/upload', formData).then((r) => r.data);
+  },
 };
 
 export interface Notification {

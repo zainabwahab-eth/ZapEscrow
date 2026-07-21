@@ -1,9 +1,11 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { authApi } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
 type Step = 'email' | 'otp' | 'password';
+
+const RESEND_COOLDOWN_SECONDS = 30;
 
 export default function SignupPage() {
   const navigate = useNavigate();
@@ -17,6 +19,14 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   async function handleEmailSubmit(e: FormEvent) {
     e.preventDefault();
@@ -29,6 +39,19 @@ export default function SignupPage() {
       setError("Couldn't send a code to that address — please try again.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleResendOtp() {
+    if (resendCooldown > 0) return;
+    setError(null);
+    setResendMessage(null);
+    try {
+      await authApi.signupStart(email);
+      setResendMessage('Sent — check your email.');
+      setResendCooldown(RESEND_COOLDOWN_SECONDS);
+    } catch {
+      setError("Couldn't resend the code — please try again.");
     }
   }
 
@@ -150,12 +173,26 @@ export default function SignupPage() {
                 {loading ? 'Verifying…' : 'Verify code'}
               </button>
 
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={resendCooldown > 0}
+                  className="text-sm text-escrow-teal font-medium hover:underline disabled:text-escrow-ink/40 disabled:no-underline disabled:cursor-not-allowed"
+                >
+                  {resendCooldown > 0 ? `Resend code (${resendCooldown}s)` : 'Resend code'}
+                </button>
+                {resendMessage && <p className="text-xs text-escrow-ink/50 mt-1">{resendMessage}</p>}
+              </div>
+
               <button
                 type="button"
                 onClick={() => {
                   setStep('email');
                   setCode('');
                   setError(null);
+                  setResendMessage(null);
+                  setResendCooldown(0);
                 }}
                 className="w-full text-sm text-escrow-ink/50 hover:text-escrow-ink transition"
               >

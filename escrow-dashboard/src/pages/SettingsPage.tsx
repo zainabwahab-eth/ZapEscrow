@@ -1,27 +1,22 @@
-import { useState, type FormEvent } from 'react';
-import { sellersApi, monnifyApi } from '../lib/api';
+import { useEffect, useState, type FormEvent } from 'react';
+import { sellersApi, monnifyApi, type MonnifyBank } from '../lib/api';
 import { useAuth } from '../lib/auth';
-
-const BANKS = [
-  { name: 'GTBank', code: '058' },
-  { name: 'Access Bank', code: '044' },
-  { name: 'Zenith Bank', code: '057' },
-  { name: 'UBA', code: '033' },
-  { name: 'First Bank', code: '011' },
-  { name: 'Kuda', code: '50211' },
-  { name: 'Opay', code: '999992' },
-  { name: 'Moniepoint', code: '50515' },
-];
-
-function bankName(code?: string | null) {
-  return BANKS.find((b) => b.code === code)?.name ?? code ?? 'Unknown bank';
-}
 
 type DisbursementStep = 'idle' | 'editing' | 'confirming';
 
 export default function SettingsPage() {
   const { seller, setSeller } = useAuth();
   const current = seller!;
+
+  const [banks, setBanks] = useState<MonnifyBank[]>([]);
+  const [banksLoading, setBanksLoading] = useState(true);
+
+  function bankName(code?: string | null) {
+    if (!code) return 'Unknown bank';
+    const match = banks.find((b) => b.code === code);
+    if (match) return match.name;
+    return banksLoading ? 'Loading…' : code;
+  }
 
   const [businessName, setBusinessName] = useState(current.businessName);
   const [phone, setPhone] = useState(current.phone ?? '');
@@ -47,11 +42,23 @@ export default function SettingsPage() {
 
   const [step, setStep] = useState<DisbursementStep>('idle');
   const [accountNumber, setAccountNumber] = useState('');
-  const [bankCode, setBankCode] = useState(BANKS[0].code);
+  const [bankCode, setBankCode] = useState('');
   const [resolvedName, setResolvedName] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [savingAccount, setSavingAccount] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
+
+  useEffect(() => {
+    monnifyApi
+      .getBanks()
+      .then((list) => {
+        const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name));
+        setBanks(sorted);
+        setBankCode((prev) => prev || sorted[0]?.code || '');
+      })
+      .catch(() => {})
+      .finally(() => setBanksLoading(false));
+  }, []);
 
   async function handleCheckAccount(e: FormEvent) {
     e.preventDefault();
@@ -181,7 +188,7 @@ export default function SettingsPage() {
                 onChange={(e) => setBankCode(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-lg border border-escrow-ink/15 focus:outline-none focus:ring-2 focus:ring-escrow-teal bg-white"
               >
-                {BANKS.map((b) => (
+                {banks.map((b) => (
                   <option key={b.code} value={b.code}>
                     {b.name}
                   </option>

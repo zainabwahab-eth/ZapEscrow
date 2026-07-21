@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Plus } from 'lucide-react';
 import { dealsApi, type Deal } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import DealsTable from '../components/DealsTable';
@@ -32,13 +34,22 @@ export default function DealsPage() {
 
   return (
     <div className="space-y-4">
-      <input
-        type="text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search by buyer name, phone, or deal code…"
-        className="w-full max-w-md px-4 py-2.5 rounded-lg border border-escrow-ink/15 bg-white focus:outline-none focus:ring-2 focus:ring-escrow-teal text-sm"
-      />
+      <div className="flex items-center justify-between gap-4">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by buyer name, phone, or deal code…"
+          className="w-full max-w-md px-4 py-2.5 rounded-lg border border-escrow-ink/15 bg-white focus:outline-none focus:ring-2 focus:ring-escrow-teal text-sm"
+        />
+        <Link
+          to="/deals/new"
+          className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-escrow-teal text-white text-sm font-medium hover:opacity-90 transition"
+        >
+          <Plus size={16} strokeWidth={2} />
+          New Deal
+        </Link>
+      </div>
 
       {loading ? (
         <p className="text-escrow-ink/50">Loading…</p>

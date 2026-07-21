@@ -1,3 +1,37 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Scroll-triggered reveal, tied directly to scroll position via the native
+   CSS Scroll-Driven Animations API — no JS observer. Browsers without
+   support (Safari/Firefox as of this writing) just see the element at rest,
+   fully visible, since the animation never applies outside @supports. */
+@supports (animation-timeline: view()) {
+  .scroll-reveal {
+    animation: fadeInUp linear both;
+    animation-timeline: view();
+    animation-range: entry 0% cover 30%;
+  }
+}
+
+/* Diagonal light sweep on hover, matching the glossy card highlight from
+   the reference site. */
+.card-sheen {
+  position: relative;
+  overflow: hidden;
+}
+.card-sheen::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -80%;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(115deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  transform: skewX(-20deg);
+  transition: left 0.7s ease;
+  pointer-events: none;
+}
+.card-sheen:hover::after {
+  left: 130%;
+}

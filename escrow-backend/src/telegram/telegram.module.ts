@@ -13,7 +13,7 @@ import { MonnifyModule } from '../monnify/monnify.module';
     forwardRef(() => DealsModule),
     AiModule,
     EmailModule,
-    StorageModule,
+    forwardRef(() => StorageModule),
     forwardRef(() => MonnifyModule),
   ],
   providers: [TelegramService],
