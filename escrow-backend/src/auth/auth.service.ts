@@ -49,9 +49,9 @@ export class AuthService {
     return randomBytes(32).toString('hex');
   }
 
-  private issueSessionToken(sellerId: string, rememberMe: boolean): string {
+  private issueSessionToken(sellerId: string, email: string, rememberMe: boolean): string {
     return this.jwtService.sign(
-      { sellerId },
+      { sellerId, email },
       { expiresIn: rememberMe ? REMEMBERED_SESSION_TTL : UNREMEMBERED_SESSION_TTL },
     );
   }
@@ -111,7 +111,10 @@ export class AuthService {
       data: { passwordHash, emailVerifiedAt: new Date() },
     });
 
-    return { token: this.issueSessionToken(updated.id, true), seller: this.sellersService.toPublic(updated) };
+    return {
+      token: this.issueSessionToken(updated.id, updated.email, true),
+      seller: this.sellersService.toPublic(updated),
+    };
   }
 
   async login(email: string, password: string, rememberMe: boolean) {
@@ -120,7 +123,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    return { token: this.issueSessionToken(seller.id, rememberMe), seller: this.sellersService.toPublic(seller) };
+    return {
+      token: this.issueSessionToken(seller.id, seller.email, rememberMe),
+      seller: this.sellersService.toPublic(seller),
+    };
   }
 
   /** Forgot password, step 1 — always returns the same generic message so the response can't be used to check which emails have accounts. */

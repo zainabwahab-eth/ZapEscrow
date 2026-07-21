@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 
 interface SessionPayload {
   sellerId: string;
+  email: string;
 }
 
 @Injectable()
@@ -19,6 +20,7 @@ export class JwtAuthGuard implements CanActivate {
       const payload = this.jwtService.verify<Partial<SessionPayload>>(token);
       if (!payload.sellerId) throw new Error('Not a session token');
       request.sellerId = payload.sellerId;
+      request.sellerEmail = payload.email;
       return true;
     } catch {
       throw new UnauthorizedException('Invalid or expired token');

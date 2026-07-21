@@ -138,6 +138,7 @@ export interface Seller {
   verifiedBadge: boolean;
   emailVerifiedAt?: string | null;
   salesChannels: string[];
+  isAdmin: boolean;
   createdAt: string;
   updatedAt: string;
 }

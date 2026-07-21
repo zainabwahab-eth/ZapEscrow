@@ -3,6 +3,7 @@ import { DealsService } from './deals.service';
 import { CreateDealDto } from './dto/create-deal.dto';
 import { DealStatus } from '../generated/prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 
 @Controller('deals')
 export class DealsController {
@@ -72,8 +73,8 @@ export class DealsController {
     return this.dealsService.raiseDispute(id, body.reason, body.evidenceUrl);
   }
 
-  // Admin-only in practice — lock this down with auth before going beyond the demo.
   @Patch(':id/resolve-dispute')
+  @UseGuards(JwtAuthGuard, AdminGuard)
   resolveDispute(@Param('id') id: string, @Body('resolution') resolution: 'RELEASED' | 'REFUNDED') {
     return this.dealsService.resolveDispute(id, resolution);
   }

@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { AdminGuard } from './admin.guard';
 import { SellersModule } from '../sellers/sellers.module';
 import { EmailModule } from '../email/email.module';
 
@@ -18,7 +19,7 @@ const jwtModule = JwtModule.registerAsync({
 @Module({
   imports: [forwardRef(() => SellersModule), EmailModule, jwtModule],
   controllers: [AuthController],
-  providers: [AuthService, JwtAuthGuard],
-  exports: [JwtAuthGuard, jwtModule],
+  providers: [AuthService, JwtAuthGuard, AdminGuard],
+  exports: [JwtAuthGuard, AdminGuard, jwtModule],
 })
 export class AuthModule {}

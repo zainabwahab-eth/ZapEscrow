@@ -1,4 +1,5 @@
 import { ConflictException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { DealsService } from '../deals/deals.service';
@@ -8,6 +9,7 @@ import type { Seller } from '../generated/prisma/client';
 export class SellersService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
     @Inject(forwardRef(() => DealsService))
     private readonly dealsService: DealsService,
   ) {}
@@ -109,10 +111,12 @@ export class SellersService {
     });
   }
 
-  /** Strips sensitive fields before a seller record is returned to the client. */
+  /** Strips sensitive fields before a seller record is returned to the client, and flags admin status for UI use (never trust this client-side for actual authorization — routes enforce it separately via AdminGuard). */
   toPublic(seller: Seller) {
     const { passwordHash, ...rest } = seller;
-    return rest;
+    const adminEmail = this.config.get<string>('ADMIN_EMAIL');
+    const isAdmin = !!adminEmail && seller.email.toLowerCase() === adminEmail.toLowerCase();
+    return { ...rest, isAdmin };
   }
 
   async getProfile(id: string) {
