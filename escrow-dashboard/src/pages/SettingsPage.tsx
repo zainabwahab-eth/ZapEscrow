@@ -151,7 +151,7 @@ export default function SettingsPage() {
         <h2 className="font-fraunces text-2xl mb-6">Disbursement account</h2>
 
         {step === 'idle' && (
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             {current.monnifySettlementAccount ? (
               <p className="text-sm text-escrow-ink/80">
                 •••• {current.monnifySettlementAccount.slice(-4)} — {bankName(current.monnifySettlementBankCode)}
@@ -161,7 +161,7 @@ export default function SettingsPage() {
             )}
             <button
               onClick={() => setStep('editing')}
-              className="px-4 py-2 rounded-full border border-escrow-ink/20 text-sm font-medium hover:border-escrow-ink/40 transition shrink-0"
+              className="px-4 py-2 rounded-full border border-escrow-ink/20 text-sm font-medium hover:border-escrow-ink/40 transition shrink-0 self-start sm:self-auto"
             >
               {current.monnifySettlementAccount ? 'Update' : 'Add account'}
             </button>

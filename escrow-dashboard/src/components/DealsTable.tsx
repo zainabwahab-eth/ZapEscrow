@@ -117,7 +117,8 @@ export default function DealsTable({
         </div>
       )}
 
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[720px]">
         <thead>
           <tr className="text-left text-gray-500 border-b">
             <th className="p-4 font-medium">Code</th>
@@ -176,6 +177,7 @@ export default function DealsTable({
           )}
         </tbody>
       </table>
+      </div>
 
       {shipModalDeal && (
         <div
