@@ -388,6 +388,13 @@ export class DealsService {
       payload: { dealId, amount: deal.amount.toString() },
     });
 
+    if (deal.seller.telegramId) {
+      await this.telegramService.sendMessage(
+        deal.seller.telegramId,
+        `✅ ₦${Number(deal.amount).toLocaleString()} has been released to your account for deal ${deal.shortCode}.`,
+      );
+    }
+
     return this.transition(
       dealId,
       DealStatus.RELEASED,
