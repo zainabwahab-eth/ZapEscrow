@@ -169,30 +169,37 @@ export class MonnifyService {
     const token = await this.getAccessToken();
     const reference = `release-${params.dealId}-${uuid().slice(0, 8)}`;
 
-    const { data } = await firstValueFrom(
-      this.http.post<SingleTransferResponse>(
-        `${this.baseUrl}/api/v2/disbursements/single`,
-        {
-          amount: params.amount,
-          reference,
-          narration: `Escrow release for deal ${params.dealId}`,
-          destinationBankCode: params.destinationBankCode,
-          destinationAccountNumber: params.destinationAccountNumber,
-          destinationAccountName: params.destinationAccountName,
-          currency: "NGN",
-        },
-        { headers: { Authorization: `Bearer ${token}` } },
-      ),
-    );
-
-    if (data.responseBody.status === "PENDING_AUTHORIZATION") {
-      // This means the OTP waiver hasn't been applied yet — flag loudly,
-      // don't let this fail silently since it blocks the whole escrow flow.
-      this.logger.error(
-        `Disbursement for deal ${params.dealId} is PENDING_AUTHORIZATION — OTP waiver may not be active yet.`,
+    try {
+      const { data } = await firstValueFrom(
+        this.http.post<SingleTransferResponse>(
+          `${this.baseUrl}/api/v2/disbursements/single`,
+          {
+            amount: params.amount,
+            reference,
+            narration: `Escrow release for deal ${params.dealId}`,
+            destinationBankCode: params.destinationBankCode,
+            destinationAccountNumber: params.destinationAccountNumber,
+            destinationAccountName: params.destinationAccountName,
+            currency: "NGN",
+          },
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
       );
-    }
 
-    return data.responseBody;
+      if (data.responseBody.status === "PENDING_AUTHORIZATION") {
+        // This means the OTP waiver hasn't been applied yet — flag loudly,
+        // don't let this fail silently since it blocks the whole escrow flow.
+        this.logger.error(
+          `Disbursement for deal ${params.dealId} is PENDING_AUTHORIZATION — OTP waiver may not be active yet.`,
+        );
+      }
+
+      return data.responseBody;
+    } catch (err) {
+      this.logger.error(
+        `Monnify disbursement rejected for deal ${params.dealId}: ${JSON.stringify(err.response?.data ?? err.message)}`,
+      );
+      throw err;
+    }
   }
 }
