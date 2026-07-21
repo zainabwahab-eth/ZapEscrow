@@ -212,7 +212,7 @@ export interface Notification {
   sellerId: string;
   type: 'DISBURSEMENT_MISSING' | 'FUNDS_RELEASED' | 'DISPUTE_ALERT' | 'DEAL_PAID' | string;
   channel: string;
-  payload?: { dealId?: string; amount?: string; code?: string } | null;
+  payload?: { dealId?: string; amount?: string; shortCode?: string; reason?: string } | null;
   read: boolean;
   sentAt: string;
 }

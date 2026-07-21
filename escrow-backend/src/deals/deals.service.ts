@@ -228,12 +228,32 @@ export class DealsService {
       data: { disputedAt: new Date() },
     });
 
-    return this.transition(
+    const updated = await this.transition(
       dealId,
       DealStatus.DISPUTED,
       DealEventActor.BUYER,
       `Dispute: ${reason}`,
     );
+
+    const seller = await this.prisma.seller.findUnique({ where: { id: deal.sellerId } });
+
+    await this.prisma.notificationLog.create({
+      data: {
+        sellerId: deal.sellerId,
+        type: "DISPUTE_ALERT",
+        channel: "IN_APP",
+        payload: { dealId, shortCode: deal.shortCode, reason },
+      },
+    });
+
+    if (seller?.telegramId) {
+      await this.telegramService.sendMessage(
+        seller.telegramId,
+        `⚠️ A dispute was raised on deal ${deal.shortCode}: "${reason}". We're reviewing it — you'll be notified once it's resolved.`,
+      );
+    }
+
+    return updated;
   }
 
   /** Admin resolves a dispute — either releases to seller or refunds buyer. */

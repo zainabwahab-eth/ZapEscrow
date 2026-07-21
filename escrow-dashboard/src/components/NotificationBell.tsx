@@ -11,7 +11,7 @@ function describeNotification(n: Notification): string {
     case 'FUNDS_RELEASED':
       return `${amount} has been released to your account`;
     case 'DISPUTE_ALERT':
-      return `A dispute was raised on deal ${n.payload?.code ?? ''}`.trim();
+      return `A dispute was raised on deal ${n.payload?.shortCode ?? ''}`.trim();
     case 'DEAL_PAID':
       return 'New payment received';
     default:
