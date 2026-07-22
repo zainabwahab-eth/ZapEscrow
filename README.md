@@ -8,6 +8,10 @@ Built for the APIconf x Monnify Hackathon by **Zainab Wahab** and **Khayrah Abdu
 
 ---
 
+**Live**: [zapescrow.xyz](https://www.zapescrow.xyz) · **Telegram bot**: [@ZapEscrowBot](https://t.me/ZapEscrowBot)
+
+---
+
 ## The problem
 
 Every day, small sellers on Instagram, WhatsApp, Tiktok and Twitter lose sales to buyers who don't trust them enough to pay upfront — and buyers who *do* pay have no recourse if a seller never delivers. Every DM sale runs purely on faith, with no system backing either side.
