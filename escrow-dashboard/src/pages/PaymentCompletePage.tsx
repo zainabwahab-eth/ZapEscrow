@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { CheckCircle2 } from 'lucide-react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { CheckCircle2, ShieldAlert } from 'lucide-react';
 import { publicDealApi, type PublicDeal } from '../lib/api';
 import CornerMarks from '../components/CornerMarks';
 import BookmarkCallout from '../components/BookmarkCallout';
 
 export default function PaymentCompletePage() {
   const { dealId } = useParams();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token');
   const [deal, setDeal] = useState<PublicDeal | null>(null);
 
   useEffect(() => {
@@ -30,13 +32,24 @@ export default function PaymentCompletePage() {
             message once your order ships, and you can confirm receipt then to release payment to the seller.
           </p>
 
-          <div className="text-left">
+          <div className="text-left space-y-3">
             <BookmarkCallout />
+
+            {token && (
+              <div className="border border-escrow-coral/40 bg-escrow-coral/5 rounded-lg p-4 flex gap-3">
+                <ShieldAlert size={18} strokeWidth={1.75} className="text-escrow-coral shrink-0 mt-0.5" />
+                <p className="text-sm text-escrow-ink/80 leading-relaxed">
+                  <span className="font-medium text-escrow-ink">This link is yours alone</span> — it's how you'll
+                  confirm you received your order. Don't share it with anyone, including the seller. Bookmark it now
+                  so you can find it again when your order arrives.
+                </p>
+              </div>
+            )}
           </div>
 
           {dealId && (
             <Link
-              to={`/pay/${dealId}`}
+              to={token ? `/pay/${dealId}?token=${token}` : `/pay/${dealId}`}
               className="inline-block text-sm text-escrow-teal font-medium hover:underline"
             >
               View order status →

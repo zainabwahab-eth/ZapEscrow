@@ -74,7 +74,8 @@ export class EmailService {
         html:
           `<p>Good news — ${params.sellerName} has shipped your order.</p>` +
           `<p>You can check its status, confirm you've received it, or raise an issue any time here:</p>` +
-          `<p><a href="${params.dealUrl}">${params.dealUrl}</a></p>`,
+          `<p><a href="${params.dealUrl}">${params.dealUrl}</a></p>` +
+          `<p><strong>Keep this link private — it's how you confirm you received your order.</strong></p>`,
       });
       if (error) this.logger.error(`Failed to send shipped-notice email to ${to}: ${error.message}`);
     } catch (err) {
@@ -96,6 +97,7 @@ export class EmailService {
           `<p>Just checking in — if you've received your order from ${params.sellerName}, confirm receipt so they can get paid.</p>` +
           `<p>If something's wrong, let us know instead:</p>` +
           `<p><a href="${params.dealUrl}">${params.dealUrl}</a></p>` +
+          `<p><strong>Keep this link private — it's how you confirm you received your order.</strong></p>` +
           `<p>If we don't hear from you soon, the payment will automatically release to the seller.</p>`,
       });
       if (error) this.logger.error(`Failed to send delivery-reminder email to ${to}: ${error.message}`);

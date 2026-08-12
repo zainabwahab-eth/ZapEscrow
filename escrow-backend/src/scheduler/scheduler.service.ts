@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { DealsService } from '../deals/deals.service';
 import { TelegramService } from '../telegram/telegram.service';
@@ -17,8 +16,7 @@ export class SchedulerService {
     private readonly aiService: AiService,
   ) {}
 
-  /** Runs daily at 7am — sends each active seller their escrow digest. */
-  @Cron('0 7 * * *')
+  /** Sends each active seller their escrow digest. Triggered daily at 7am by Cloud Scheduler. */
   async sendDailyDigests() {
     const sellers = await this.prisma.seller.findMany({
       where: {
@@ -63,10 +61,10 @@ export class SchedulerService {
   }
 
   /**
-   * Runs hourly. For shipped deals nearing their deadline, sends a
-   * "did you receive this?" prompt; for deals past deadline, auto-releases.
+   * Triggered hourly by Cloud Scheduler. For shipped deals nearing their
+   * deadline, sends a "did you receive this?" prompt; for deals past
+   * deadline, auto-releases.
    */
-  @Cron(CronExpression.EVERY_HOUR)
   async checkDeadlines() {
     const pastDeadline = await this.dealsService.findPastDeadline();
     for (const deal of pastDeadline) {

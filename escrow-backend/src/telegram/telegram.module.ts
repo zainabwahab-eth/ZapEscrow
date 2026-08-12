@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { TelegramController } from './telegram.controller';
 import { TelegramService } from './telegram.service';
 import { SellersModule } from '../sellers/sellers.module';
 import { DealsModule } from '../deals/deals.module';
@@ -16,6 +17,7 @@ import { MonnifyModule } from '../monnify/monnify.module';
     forwardRef(() => StorageModule),
     forwardRef(() => MonnifyModule),
   ],
+  controllers: [TelegramController],
   providers: [TelegramService],
   exports: [TelegramService],
 })

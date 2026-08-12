@@ -16,18 +16,25 @@ export class AiService {
   constructor(private readonly config: ConfigService) {
     const provider = this.config.get<string>('AI_PROVIDER', 'nvidia');
 
+    // Free-tier NIM/OpenRouter endpoints can take 20-30s+ for a multi-item
+    // extraction (observed: 30.4s for a 2-item deal) — a short timeout kills
+    // legitimate requests before they finish. maxRetries is capped at 1
+    // (default is 2) so a genuine outage fails in ~2x this timeout instead
+    // of 3x; Telegram users shouldn't wait over a minute for a reply.
     if (provider === 'openrouter') {
       this.client = new OpenAI({
         apiKey: this.config.get<string>('OPENROUTER_API_KEY', ''),
         baseURL: this.config.get<string>('OPENROUTER_BASE_URL', ''),
-        timeout: 10_000,
+        timeout: 40_000,
+        maxRetries: 1,
       });
       this.model = this.config.get<string>('OPENROUTER_MODEL', '');
     } else {
       this.client = new OpenAI({
         apiKey: this.config.get<string>('NVIDIA_API_KEY', ''),
         baseURL: this.config.get<string>('NVIDIA_BASE_URL', ''),
-        timeout: 10_000,
+        timeout: 40_000,
+        maxRetries: 1,
       });
       this.model = this.config.get<string>('NVIDIA_MODEL', '');
     }
@@ -43,37 +50,37 @@ export class AiService {
     buyerEmail?: string;
     items: { name: string; unitPrice: number; quantity: number }[];
   }> {
+    // Lets request failures (timeout, 5xx, network) propagate to the caller
+    // instead of masquerading as "no deal found" — those are different
+    // problems and deserve different messages to the seller. Only a
+    // genuinely empty `items` array from a successful response means "no
+    // deal found here."
+    const completion = await this.client.chat.completions.create({
+      model: this.model,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Extract structured deal info from Nigerian seller messages. ' +
+            'Respond ONLY with JSON, no preamble, no markdown fences. ' +
+            'Shape: {"buyerName": string|null, "buyerPhone": string|null, "buyerEmail": string|null, "items": [{"name": string, "unitPrice": number, "quantity": number}]}. ' +
+            'Phone numbers are Nigerian format (e.g. 080..., 070..., 090..., 081...). ' +
+            'Prices are in Naira. If quantity is not stated, default to 1. ' +
+            'If buyer phone or email are not mentioned, use null.',
+        },
+        { role: 'user', content: text },
+      ],
+      temperature: 0,
+    });
+
+    const raw = completion.choices[0]?.message?.content ?? '{}';
+    this.logger.debug(`Raw AI response for extractDealFromText: ${raw}`);
+
     try {
-      const completion = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'Extract structured deal info from Nigerian seller messages. ' +
-              'Respond ONLY with JSON, no preamble, no markdown fences. ' +
-              'Shape: {"buyerName": string|null, "buyerPhone": string|null, "buyerEmail": string|null, "items": [{"name": string, "unitPrice": number, "quantity": number}]}. ' +
-              'Phone numbers are Nigerian format (e.g. 080..., 070..., 090..., 081...). ' +
-              'Prices are in Naira. If quantity is not stated, default to 1. ' +
-              'If buyer phone or email are not mentioned, use null.',
-          },
-          { role: 'user', content: text },
-        ],
-        temperature: 0,
-      });
-
-      const raw = completion.choices[0]?.message?.content ?? '{}';
-      this.logger.debug(`Raw AI response for extractDealFromText: ${raw}`);
-
-      try {
-        return JSON.parse(this.stripFences(raw));
-      } catch (err) {
-        this.logger.error(`Failed to parse AI response as JSON: ${raw}`, err instanceof Error ? err.stack : err);
-        return { items: [] };
-      }
+      return JSON.parse(this.stripFences(raw));
     } catch (err) {
-      this.logger.error(`AI request failed in extractDealFromText: ${err instanceof Error ? err.message : err}`);
-      return { items: [] };
+      this.logger.error(`Failed to parse AI response as JSON: ${raw}`, err instanceof Error ? err.stack : err);
+      throw new Error('AI response was not valid JSON');
     }
   }
 

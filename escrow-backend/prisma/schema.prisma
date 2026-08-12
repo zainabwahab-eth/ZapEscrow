@@ -100,6 +100,12 @@ model Deal {
 
   status DealStatus @default(CREATED)
 
+  // Given only to whoever completes payment (via the Monnify redirect URL) or
+  // receives a shipped/reminder email — never shown on the seller's plain
+  // shareable link. Required to confirm receipt or raise a dispute, so a
+  // dishonest seller can't self-confirm using their own link.
+  confirmationToken String @unique @default(uuid())
+
   paidAt                DateTime?
   estimatedDeliveryDate DateTime?
   shippedAt             DateTime?

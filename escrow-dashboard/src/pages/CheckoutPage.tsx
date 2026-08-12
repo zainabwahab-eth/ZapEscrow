@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { Lock, Clock, Package, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { publicDealApi, type PublicDeal } from '../lib/api';
 import CornerMarks from '../components/CornerMarks';
@@ -22,6 +22,12 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 export default function CheckoutPage() {
   const { dealId } = useParams();
+  const [searchParams] = useSearchParams();
+  // Only present when the page was reached via the buyer's own token-bearing
+  // link (post-payment redirect or shipped/reminder email) — never on the
+  // seller's plain shareable link. Gates the state-changing actions below so
+  // only the real buyer can confirm receipt or raise a dispute.
+  const token = searchParams.get('token');
   const [deal, setDeal] = useState<PublicDeal | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,11 +70,11 @@ export default function CheckoutPage() {
   }, [load]);
 
   async function handleConfirm() {
-    if (!dealId) return;
+    if (!dealId || !token) return;
     setConfirmError(null);
     setConfirming(true);
     try {
-      await publicDealApi.confirm(dealId);
+      await publicDealApi.confirm(dealId, token);
       load();
     } catch {
       setConfirmError("Couldn't confirm receipt — please try again.");
@@ -78,11 +84,11 @@ export default function CheckoutPage() {
   }
 
   async function handleSubmitDispute() {
-    if (!dealId || !disputeReason.trim()) return;
+    if (!dealId || !token || !disputeReason.trim()) return;
     setDisputeError(null);
     setDisputeSubmitting(true);
     try {
-      await publicDealApi.dispute(dealId, disputeReason.trim());
+      await publicDealApi.dispute(dealId, disputeReason.trim(), token);
       setReportingIssue(false);
       load();
     } catch {
@@ -196,62 +202,71 @@ export default function CheckoutPage() {
                   Shipped{formatDate(deal.estimatedDeliveryDate) ? ` — expected ${formatDate(deal.estimatedDeliveryDate)}` : ''}
                 </p>
               </div>
-              <p className="text-sm text-escrow-ink/70 leading-relaxed">
-                Received your order? Confirm below to release payment to the seller. If there's a problem, let us
-                know instead of confirming.
-                {formatDate(deal.autoReleaseDeadline) &&
-                  ` If we don't hear from you by ${formatDate(deal.autoReleaseDeadline)}, payment releases automatically.`}
-              </p>
+              {token ? (
+                <>
+                  <p className="text-sm text-escrow-ink/70 leading-relaxed">
+                    Received your order? Confirm below to release payment to the seller. If there's a problem, let us
+                    know instead of confirming.
+                    {formatDate(deal.autoReleaseDeadline) &&
+                      ` If we don't hear from you by ${formatDate(deal.autoReleaseDeadline)}, payment releases automatically.`}
+                  </p>
 
-              {!reportingIssue && (
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <button
-                    onClick={handleConfirm}
-                    disabled={confirming}
-                    className="flex-1 bg-escrow-teal text-white font-medium py-3 rounded-full hover:opacity-90 transition disabled:opacity-50"
-                  >
-                    {confirming ? 'Confirming…' : 'Confirm receipt'}
-                  </button>
-                  <button
-                    onClick={() => setReportingIssue(true)}
-                    className="flex-1 border border-escrow-ink/20 text-escrow-ink font-medium py-3 rounded-full hover:border-escrow-ink/40 transition"
-                  >
-                    Report a problem
-                  </button>
-                </div>
-              )}
-              {confirmError && <p className="text-sm text-escrow-coral">{confirmError}</p>}
+                  {!reportingIssue && (
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <button
+                        onClick={handleConfirm}
+                        disabled={confirming}
+                        className="flex-1 bg-escrow-teal text-white font-medium py-3 rounded-full hover:opacity-90 transition disabled:opacity-50"
+                      >
+                        {confirming ? 'Confirming…' : 'Confirm receipt'}
+                      </button>
+                      <button
+                        onClick={() => setReportingIssue(true)}
+                        className="flex-1 border border-escrow-ink/20 text-escrow-ink font-medium py-3 rounded-full hover:border-escrow-ink/40 transition"
+                      >
+                        Report a problem
+                      </button>
+                    </div>
+                  )}
+                  {confirmError && <p className="text-sm text-escrow-coral">{confirmError}</p>}
 
-              {reportingIssue && (
-                <div className="space-y-3">
-                  <label className="block text-sm font-medium text-escrow-ink/70">What went wrong?</label>
-                  <textarea
-                    value={disputeReason}
-                    onChange={(e) => setDisputeReason(e.target.value)}
-                    rows={3}
-                    className="w-full px-4 py-2.5 rounded-lg border border-escrow-ink/15 focus:outline-none focus:ring-2 focus:ring-escrow-teal resize-none"
-                    placeholder="Tell us what happened…"
-                  />
-                  {disputeError && <p className="text-sm text-escrow-coral">{disputeError}</p>}
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleSubmitDispute}
-                      disabled={disputeSubmitting || !disputeReason.trim()}
-                      className="flex-1 bg-escrow-coral text-white font-medium py-2.5 rounded-full hover:opacity-90 transition disabled:opacity-50"
-                    >
-                      {disputeSubmitting ? 'Submitting…' : 'Submit'}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setReportingIssue(false);
-                        setDisputeError(null);
-                      }}
-                      className="text-sm text-escrow-ink/50 hover:text-escrow-ink transition px-4"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
+                  {reportingIssue && (
+                    <div className="space-y-3">
+                      <label className="block text-sm font-medium text-escrow-ink/70">What went wrong?</label>
+                      <textarea
+                        value={disputeReason}
+                        onChange={(e) => setDisputeReason(e.target.value)}
+                        rows={3}
+                        className="w-full px-4 py-2.5 rounded-lg border border-escrow-ink/15 focus:outline-none focus:ring-2 focus:ring-escrow-teal resize-none"
+                        placeholder="Tell us what happened…"
+                      />
+                      {disputeError && <p className="text-sm text-escrow-coral">{disputeError}</p>}
+                      <div className="flex gap-3">
+                        <button
+                          onClick={handleSubmitDispute}
+                          disabled={disputeSubmitting || !disputeReason.trim()}
+                          className="flex-1 bg-escrow-coral text-white font-medium py-2.5 rounded-full hover:opacity-90 transition disabled:opacity-50"
+                        >
+                          {disputeSubmitting ? 'Submitting…' : 'Submit'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setReportingIssue(false);
+                            setDisputeError(null);
+                          }}
+                          className="text-sm text-escrow-ink/50 hover:text-escrow-ink transition px-4"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-escrow-ink/50 leading-relaxed">
+                  Only the buyer can confirm receipt or report a problem on this order — that action isn't available
+                  from this link.
+                </p>
               )}
             </div>
           )}

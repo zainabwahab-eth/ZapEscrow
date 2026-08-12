@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   forwardRef,
   Inject,
   Injectable,
@@ -81,12 +82,18 @@ export class DealsService {
       buyerEmail: dto.buyerEmail ?? "",
       buyerName: dto.buyerName ?? dto.buyerPhone,
       dealId: deal.id,
+      confirmationToken: deal.confirmationToken,
     });
 
     this.logger.log(
       `Monnify transaction initialized: ${JSON.stringify(monnifyTx)}`,
     );
 
+    // omit confirmationToken — this response goes straight back to whoever
+    // called POST /deals (the seller's dashboard or Telegram flow), and the
+    // token must never reach the seller or they could read it out of their
+    // own network tab and self-confirm the deal, which is exactly what it
+    // exists to prevent. Only the Monnify redirect and buyer emails carry it.
     return this.prisma.deal.update({
       where: { id: deal.id },
       data: {
@@ -95,6 +102,7 @@ export class DealsService {
         checkoutUrl: monnifyTx.checkoutUrl,
       },
       include: { items: true },
+      omit: { confirmationToken: true },
     });
   }
 
@@ -147,6 +155,7 @@ export class DealsService {
       return this.prisma.deal.update({
         where: { id: dealId },
         data: { estimatedDeliveryDate, autoReleaseDeadline: deadline },
+        omit: { confirmationToken: true },
       });
     }
 
@@ -178,7 +187,7 @@ export class DealsService {
 
     if (deal.buyerEmail) {
       const seller = await this.prisma.seller.findUnique({ where: { id: deal.sellerId } });
-      const dealUrl = `${this.config.get<string>("PUBLIC_FRONTEND_URL", "")}/pay/${dealId}`;
+      const dealUrl = `${this.config.get<string>("PUBLIC_FRONTEND_URL", "")}/pay/${dealId}?token=${deal.confirmationToken}`;
       await this.emailService.sendShippedNotice(deal.buyerEmail, {
         sellerName: seller?.businessName ?? "the seller",
         dealUrl,
@@ -188,9 +197,22 @@ export class DealsService {
     return updated;
   }
 
+  /**
+   * Confirms the caller holds deal.confirmationToken — the secret only ever
+   * handed to whoever completes payment (Monnify redirect) or receives the
+   * shipped/reminder emails. Prevents a seller from confirming or disputing
+   * their own deal using the plain shareable link they created.
+   */
+  private verifyConfirmationToken(deal: { confirmationToken: string }, token: string | undefined) {
+    if (!token || token !== deal.confirmationToken) {
+      throw new ForbiddenException("Invalid or missing confirmation token");
+    }
+  }
+
   /** Buyer confirms receipt — triggers fund release. */
-  async confirmDelivery(dealId: string) {
+  async confirmDelivery(dealId: string, token: string) {
     const deal = await this.getOrThrow(dealId);
+    this.verifyConfirmationToken(deal, token);
     if (deal.status !== DealStatus.SHIPPED) {
       throw new BadRequestException(
         "Deal must be SHIPPED before delivery can be confirmed",
@@ -212,8 +234,9 @@ export class DealsService {
   }
 
   /** Buyer raises a dispute — freezes funds, creates the dispute record. */
-  async raiseDispute(dealId: string, reason: string, evidenceUrl?: string) {
+  async raiseDispute(dealId: string, token: string, reason: string, evidenceUrl?: string) {
     const deal = await this.getOrThrow(dealId);
+    this.verifyConfirmationToken(deal, token);
     if (deal.status !== DealStatus.SHIPPED) {
       throw new BadRequestException(
         "Disputes can only be raised on shipped deals",
@@ -285,7 +308,7 @@ export class DealsService {
       "Dispute resolved — refunding buyer",
     );
     // TODO: wire actual Monnify refund call here once refund flow is scoped
-    return this.getOrThrow(dealId);
+    return this.prisma.deal.findUnique({ where: { id: dealId }, omit: { confirmationToken: true } });
   }
 
   /** Called by the scheduler for deals past their auto-release deadline with no buyer response. */
@@ -447,9 +470,13 @@ export class DealsService {
     await this.prisma.dealEvent.create({
       data: { dealId, fromStatus: current.status, toStatus, actor, note },
     });
+    // omit confirmationToken — this return value flows back out through
+    // several seller-facing routes (markShipped, resolveDispute), and the
+    // token must never reach the seller. See the note in create().
     return this.prisma.deal.update({
       where: { id: dealId },
       data: { status: toStatus },
+      omit: { confirmationToken: true },
     });
   }
 
@@ -500,6 +527,7 @@ export class DealsService {
     return this.prisma.deal.findMany({
       where: { sellerId, ...(status ? { status } : {}) },
       include: { items: true },
+      omit: { confirmationToken: true },
       orderBy: { createdAt: "desc" },
     });
   }
@@ -561,7 +589,7 @@ export class DealsService {
     const deal = await this.prisma.deal.findUnique({ where: { id: dealId }, include: { seller: true } });
     if (!deal || !deal.buyerEmail) return;
 
-    const dealUrl = `${this.config.get<string>("PUBLIC_FRONTEND_URL", "")}/pay/${dealId}`;
+    const dealUrl = `${this.config.get<string>("PUBLIC_FRONTEND_URL", "")}/pay/${dealId}?token=${deal.confirmationToken}`;
     await this.emailService.sendDeliveryReminder(deal.buyerEmail, {
       sellerName: deal.seller.businessName,
       dealUrl,
@@ -574,6 +602,7 @@ export class DealsService {
     return this.prisma.deal.findMany({
       where: { status: DealStatus.DISPUTED },
       include: { items: true, dispute: true, seller: { select: { businessName: true } } },
+      omit: { confirmationToken: true },
       orderBy: { disputedAt: "desc" },
     });
   }

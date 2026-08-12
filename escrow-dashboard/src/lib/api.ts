@@ -121,10 +121,15 @@ export interface PublicDeal {
 export const publicDealApi = {
   get: (dealId: string) => api.get<PublicDeal>(`/deals/${dealId}/public`).then((r) => r.data),
 
-  confirm: (dealId: string) => api.post(`/deals/${dealId}/public/confirm`).then((r) => r.data),
+  // token is the buyer's confirmationToken — only ever handed to whoever
+  // completes payment or receives the shipped/reminder emails, never the
+  // seller's plain shareable link. Required so only the real buyer can
+  // confirm receipt or raise a dispute.
+  confirm: (dealId: string, token: string) =>
+    api.post(`/deals/${dealId}/public/confirm`, undefined, { params: { token } }).then((r) => r.data),
 
-  dispute: (dealId: string, reason: string) =>
-    api.post(`/deals/${dealId}/public/dispute`, { reason }).then((r) => r.data),
+  dispute: (dealId: string, reason: string, token: string) =>
+    api.post(`/deals/${dealId}/public/dispute`, { reason }, { params: { token } }).then((r) => r.data),
 };
 
 export interface Seller {

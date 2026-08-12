@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ScheduleModule } from '@nestjs/schedule';
+import { AppController } from './app.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { SellersModule } from './sellers/sellers.module';
 import { DealsModule } from './deals/deals.module';
@@ -16,7 +16,6 @@ import { AuthModule } from './auth/auth.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ScheduleModule.forRoot(), // powers the 7am digest + auto-release cron jobs
     PrismaModule,
     SellersModule,
     DealsModule,
@@ -29,5 +28,6 @@ import { AuthModule } from './auth/auth.module';
     StorageModule,
     AuthModule,
   ],
+  controllers: [AppController],
 })
 export class AppModule {}

@@ -127,7 +127,15 @@ export class TelegramService implements OnModuleInit {
           this.logger.warn('TELEGRAM_USE_WEBHOOK is true but TELEGRAM_WEBHOOK_URL is not set — webhook not registered');
         }
       } else {
-        await this.withTimeout(this.bot.launch(), BOT_STARTUP_TIMEOUT_MS, 'bot.launch');
+        // bot.launch()'s promise is designed to stay pending for the bot's
+        // entire runtime — it only resolves once bot.stop() is called, not
+        // once polling starts. Awaiting it here would always hit our
+        // startup timeout and log a false "failed to start" error even on
+        // a fully working bot. Fire it and let a real launch failure (bad
+        // token, network down) surface via the rejection handler instead.
+        this.bot.launch().catch((err) => {
+          this.logger.error('Telegram bot polling stopped unexpectedly:', err);
+        });
         this.logger.log('Telegram bot launched in polling mode');
       }
     } catch (err) {
@@ -268,7 +276,19 @@ export class TelegramService implements OnModuleInit {
 
   /** Runs a free-text deal description through AI extraction and shows the review card. Shared by natural-language messages and /add. */
   private async handleNaturalLanguageDeal(ctx: any, telegramId: string, text: string) {
-    const extracted = await this.aiService.extractDealFromText(text);
+    // Extraction can take up to ~40s on a slow AI response — let the seller
+    // know something's happening instead of leaving them staring at silence.
+    await ctx.sendChatAction('typing').catch(() => {});
+
+    let extracted: Awaited<ReturnType<AiService['extractDealFromText']>>;
+    try {
+      extracted = await this.aiService.extractDealFromText(text);
+    } catch (err) {
+      this.logger.error(`AI extraction failed for "${text}":`, err);
+      await ctx.reply("I'm having trouble reading that right now — please try again in a moment.");
+      return;
+    }
+
     if (!extracted.items?.length) {
       await ctx.reply(
         `I couldn't find a deal in that message. Here's what I can help with:\n\n${this.commandReference}`,
@@ -791,5 +811,11 @@ export class TelegramService implements OnModuleInit {
   async sendMessage(telegramId: string, text: string) {
     if (!this.bot) return;
     await this.bot.telegram.sendMessage(telegramId, text);
+  }
+
+  /** Hands a Telegram update to Telegraf manually — used by the webhook controller in webhook mode. */
+  async handleUpdate(update: any) {
+    if (!this.bot) return;
+    await this.bot.handleUpdate(update);
   }
 }

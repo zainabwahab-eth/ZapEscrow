@@ -81,6 +81,7 @@ export class MonnifyService {
     buyerEmail: string;
     buyerName: string;
     dealId: string;
+    confirmationToken: string;
   }): Promise<{
     paymentReference: string;
     transactionReference: string;
@@ -100,7 +101,7 @@ export class MonnifyService {
           paymentDescription: `Escrow payment for deal ${params.dealId}`,
           currencyCode: "NGN",
           contractCode: this.config.get<string>("MONNIFY_CONTRACT_CODE"),
-          redirectUrl: `${this.config.get<string>("PUBLIC_FRONTEND_URL")}/pay/${params.dealId}/complete`,
+          redirectUrl: `${this.config.get<string>("PUBLIC_FRONTEND_URL")}/pay/${params.dealId}/complete?token=${params.confirmationToken}`,
           paymentMethods: ["ACCOUNT_TRANSFER", "CARD", "USSD"],
         },
         { headers: { Authorization: `Bearer ${token}` } },

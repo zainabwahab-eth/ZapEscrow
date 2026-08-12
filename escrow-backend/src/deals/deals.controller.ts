@@ -43,34 +43,24 @@ export class DealsController {
   }
 
   // Buyer-facing confirm/dispute actions from the public status page — no
-  // auth, buyer is intentionally accountless. Same underlying logic as the
-  // /confirm-delivery and /dispute routes below, just namespaced under
-  // /public to make clear these are meant to be called from that page.
+  // seller/buyer account, so the buyer is authenticated by possession of
+  // deal.confirmationToken instead. That token is only ever handed to
+  // whoever completes payment (via the Monnify redirect) or receives the
+  // shipped/reminder emails — never shown on the seller's plain shareable
+  // link — so a seller can't self-confirm their own deal.
   @Post(':id/public/confirm')
-  confirmPublic(@Param('id') id: string) {
-    return this.dealsService.confirmDelivery(id);
+  confirmPublic(@Param('id') id: string, @Query('token') token: string) {
+    return this.dealsService.confirmDelivery(id, token);
   }
 
   @Post(':id/public/dispute')
-  disputePublic(@Param('id') id: string, @Body() body: { reason: string }) {
-    return this.dealsService.raiseDispute(id, body.reason);
+  disputePublic(@Param('id') id: string, @Query('token') token: string, @Body() body: { reason: string }) {
+    return this.dealsService.raiseDispute(id, token, body.reason);
   }
 
   @Patch(':id/ship')
   markShipped(@Param('id') id: string, @Body('estimatedDeliveryDate') eta?: string) {
     return this.dealsService.markShipped(id, eta ? new Date(eta) : undefined);
-  }
-
-  // Buyer confirms via the checkout page or a Telegram reply — no auth,
-  // buyer is intentionally accountless.
-  @Patch(':id/confirm-delivery')
-  confirmDelivery(@Param('id') id: string) {
-    return this.dealsService.confirmDelivery(id);
-  }
-
-  @Patch(':id/dispute')
-  raiseDispute(@Param('id') id: string, @Body() body: { reason: string; evidenceUrl?: string }) {
-    return this.dealsService.raiseDispute(id, body.reason, body.evidenceUrl);
   }
 
   @Patch(':id/resolve-dispute')
