@@ -122,7 +122,7 @@ export class TelegramService implements OnModuleInit {
       if (useWebhook) {
         const webhookUrl = this.config.get<string>('TELEGRAM_WEBHOOK_URL');
         if (webhookUrl) {
-          await this.withTimeout(this.bot.telegram.setWebhook(webhookUrl), BOT_STARTUP_TIMEOUT_MS, 'setWebhook');
+          await this.withTimeout(this.bot.telegram.setWebhook(`${webhookUrl}/telegram/webhook`), BOT_STARTUP_TIMEOUT_MS, 'setWebhook');
         } else {
           this.logger.warn('TELEGRAM_USE_WEBHOOK is true but TELEGRAM_WEBHOOK_URL is not set — webhook not registered');
         }

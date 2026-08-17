@@ -101,7 +101,14 @@ export class MonnifyService {
           paymentDescription: `Escrow payment for deal ${params.dealId}`,
           currencyCode: "NGN",
           contractCode: this.config.get<string>("MONNIFY_CONTRACT_CODE"),
-          redirectUrl: `${this.config.get<string>("PUBLIC_FRONTEND_URL")}/pay/${params.dealId}/complete?token=${params.confirmationToken}`,
+          // Path segment, not a query param — Monnify appends its own
+          // `?paymentReference=...` to whatever redirectUrl we send using a
+          // literal `?`, without checking whether we already have a query
+          // string. A `?token=...` here collides with that (producing
+          // `?token=xxx?paymentReference=yyy`), which a standard URL parser
+          // reads as the single token value `xxx?paymentReference=yyy` —
+          // corrupting every buyer's confirmation token on redirect.
+          redirectUrl: `${this.config.get<string>("PUBLIC_FRONTEND_URL")}/pay/${params.dealId}/complete/${params.confirmationToken}`,
           paymentMethods: ["ACCOUNT_TRANSFER", "CARD", "USSD"],
         },
         { headers: { Authorization: `Bearer ${token}` } },

@@ -6,9 +6,11 @@ import CornerMarks from '../components/CornerMarks';
 import BookmarkCallout from '../components/BookmarkCallout';
 
 export default function PaymentCompletePage() {
-  const { dealId } = useParams();
+  const { dealId, token: pathToken } = useParams();
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('token');
+  // Monnify's redirect lands here with the token as a path segment (see
+  // App.tsx route comment); ?token= is only a fallback for older links.
+  const token = pathToken ?? searchParams.get('token');
   const [deal, setDeal] = useState<PublicDeal | null>(null);
 
   useEffect(() => {

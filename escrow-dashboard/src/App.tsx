@@ -54,6 +54,11 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
         <Route path="/pay/:dealId" element={<CheckoutPage />} />
+        {/* Monnify's own redirectUrl always ends up here — token is a path segment, not a
+            query param, since Monnify blindly appends "?paymentReference=..." to whatever
+            URL we give it and would collide with a "?token=..." query string. */}
+        <Route path="/pay/:dealId/complete/:token" element={<PaymentCompletePage />} />
+        {/* Legacy shape, kept for any already-issued links that still use ?token=. */}
         <Route path="/pay/:dealId/complete" element={<PaymentCompletePage />} />
       </Routes>
     </AuthProvider>
